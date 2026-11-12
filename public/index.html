@@ -76,6 +76,12 @@
     .person img { width:28px; height:28px; border-radius:50%; object-fit:cover; background:#333; flex:none; }
     .person span { overflow:hidden; text-overflow:ellipsis; }
     .person small { color:var(--muted); }
+    .tts-grid { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap:12px 16px; align-items:end; }
+    @media (max-width: 760px) { .tts-grid { grid-template-columns: minmax(0,1fr); } }
+    .field { display:flex; flex-direction:column; align-items:stretch; flex-wrap:nowrap; gap:6px; font-size:13px; color:var(--muted); }
+    .field input[type=text], .field select { width:100%; }
+    .badge { font-size:12px; padding:2px 8px; border-radius:99px; background:#2a2f3a; color:var(--muted); }
+    .badge.on { background:#123d27; color:var(--ok); }
     a.btn { white-space:nowrap; flex:none; display:inline-block; border-radius:8px; padding:9px 14px; font-size:14px; font-weight:600; background:#2a2f3a; color:var(--text); text-decoration:none; }
   </style>
 </head>
@@ -118,6 +124,33 @@
         <button id="btnTest">🖨️ In thử</button>
         <button id="btnReset">Xoá danh sách đã in</button>
       </div>
+    </div>
+
+    <!-- Đọc lời cảm ơn -->
+    <div class="card tab-live" style="grid-column:1/-1">
+      <div class="card-head">
+        <h2>🔊 Đọc lời cảm ơn</h2>
+        <span id="ttsBadge" class="badge">Đang tắt</span>
+      </div>
+      <div class="row">
+        <label><input id="ttsOn" type="checkbox" /> Bật đọc trên máy này khi có quà được in</label>
+      </div>
+      <div class="tts-grid">
+        <label class="field"><span>Câu đọc <code>{name}</code> = tên người tặng</span>
+          <input id="ttsTemplate" type="text" maxlength="200" />
+        </label>
+        <label class="field"><span>Giọng đọc</span>
+          <select id="ttsVoice"></select>
+        </label>
+        <label class="field"><span>Tốc độ: <b id="ttsRateVal">1.0</b>x</span>
+          <input id="ttsRate" type="range" min="0.6" max="1.4" step="0.1" value="1" />
+        </label>
+        <div class="row" style="margin:0">
+          <button id="btnTtsTest">▶️ Đọc thử</button>
+          <button id="btnTtsDefault" title="Khôi phục câu mặc định">↺ Mặc định</button>
+        </div>
+      </div>
+      <p class="hint" id="ttsHint" style="margin-top:10px">Chỉ 1 tab được đọc (tab bật sau cùng). Mở trang ở máy phát live để tiếng được thu vào live.</p>
     </div>
 
     <!-- Nhật ký quà -->
@@ -203,6 +236,7 @@
       $('autoPrint').checked = s.autoPrint;
       $('oncePerUser').checked = s.oncePerUser;
       if (document.activeElement !== $('minDiamonds')) $('minDiamonds').value = s.minDiamonds;
+      if (document.activeElement !== $('ttsTemplate')) $('ttsTemplate').value = s.thanksTemplate || '';
       if (s.printer && [...$('printer').options].some((o) => o.value === s.printer)) $('printer').value = s.printer;
       checkPrinter();
     });
@@ -311,6 +345,75 @@
       }
     };
     socket.on('gift-update', (u) => { const li = rows.get(u.id); if (li) renderTag(li, u); });
+
+    // ===================== ĐỌC LỜI CẢM ƠN (Web Speech API của trình duyệt) =====================
+    const DEFAULT_THANKS = 'Thank you {name}! Here is a photo for you.';
+    const tts = window.speechSynthesis;
+    let isSpeaker = false, speakerElsewhere = false, speakQueue = 0;
+    const ttsPref = (() => { try { return JSON.parse(localStorage.getItem('gp-tts') || '{}'); } catch (_) { return {}; } })();
+    const saveTtsPref = () => { try { localStorage.setItem('gp-tts', JSON.stringify({ voice: $('ttsVoice').value, rate: $('ttsRate').value, on: $('ttsOn').checked })); } catch (_) {} };
+    $('ttsRate').value = ttsPref.rate || 1;
+    $('ttsRateVal').textContent = Number($('ttsRate').value).toFixed(1);
+
+    // Danh sách giọng tiếng Anh (Chrome tải giọng không đồng bộ -> nghe sự kiện voiceschanged)
+    function loadVoices() {
+      if (!tts) return;
+      const voices = tts.getVoices().filter((v) => /^en[-_]/i.test(v.lang));
+      // Ưu tiên giọng Google (online, tự nhiên hơn) và en-US
+      voices.sort((a, b) => (/google/i.test(b.name) - /google/i.test(a.name)) || (/en[-_]US/i.test(b.lang) - /en[-_]US/i.test(a.lang)));
+      const sel = $('ttsVoice'); const prev = sel.value || ttsPref.voice;
+      sel.innerHTML = '';
+      if (!voices.length) { sel.append(el('option', { value: '' }, 'Giọng mặc định của máy')); return; }
+      voices.forEach((v) => sel.append(el('option', { value: v.name }, `${v.name} (${v.lang})`)));
+      if (voices.some((v) => v.name === prev)) sel.value = prev;
+    }
+    if (tts) { loadVoices(); tts.onvoiceschanged = loadVoices; }
+
+    function speak(text) {
+      if (!tts) return;
+      if (tts.pending && speakQueue > 5) return; // quá nhiều câu đang chờ (quà dồn dập) -> bỏ bớt
+      const u = new SpeechSynthesisUtterance(text);
+      const voice = tts.getVoices().find((v) => v.name === $('ttsVoice').value);
+      if (voice) u.voice = voice;
+      u.lang = voice?.lang || 'en-US';
+      u.rate = Number($('ttsRate').value) || 1;
+      speakQueue++;
+      u.onend = u.onerror = () => { speakQueue = Math.max(0, speakQueue - 1); };
+      tts.speak(u);
+    }
+
+    function renderSpeaker() {
+      $('ttsOn').checked = isSpeaker;
+      $('ttsBadge').textContent = isSpeaker ? 'Đang đọc trên tab này' : speakerElsewhere ? 'Tab khác đang đọc' : 'Đang tắt';
+      $('ttsBadge').className = 'badge' + (isSpeaker ? ' on' : '');
+    }
+    socket.on('speaker', ({ id }) => {
+      isSpeaker = !!id && id === socket.id;
+      speakerElsewhere = !!id && !isSpeaker;
+      renderSpeaker();
+    });
+    $('ttsOn').onchange = () => {
+      if (!tts) { alert('Trình duyệt này không hỗ trợ đọc giọng nói. Hãy dùng Chrome hoặc Edge.'); $('ttsOn').checked = false; return; }
+      socket.emit($('ttsOn').checked ? 'claim-speaker' : 'release-speaker');
+      if ($('ttsOn').checked) speak('Voice is on.'); // lần bấm này cũng "mở khoá" âm thanh cho trình duyệt
+      saveTtsPref();
+    };
+    // Tải lại trang: Chrome chỉ cho phát tiếng sau khi người dùng bấm vào trang -> bấm bất kỳ đâu để bật lại
+    if (ttsPref.on && tts) {
+      $('ttsHint').textContent = '👆 Lần trước bạn bật đọc. Bấm vào bất kỳ chỗ nào trên trang để bật lại (trình duyệt yêu cầu).';
+      document.addEventListener('click', function reEnable(e) {
+        document.removeEventListener('click', reEnable, true);
+        if (e.target !== $('ttsOn') && !isSpeaker) { socket.emit('claim-speaker'); }
+        $('ttsHint').textContent = 'Chỉ 1 tab được đọc (tab bật sau cùng). Mở trang ở máy phát live để tiếng được thu vào live.';
+      }, true);
+    }
+    socket.on('speak', ({ text }) => { if (isSpeaker) speak(text); });
+
+    $('ttsTemplate').onchange = () => send({ thanksTemplate: $('ttsTemplate').value });
+    $('btnTtsDefault').onclick = () => { $('ttsTemplate').value = DEFAULT_THANKS; send({ thanksTemplate: DEFAULT_THANKS }); };
+    $('ttsVoice').onchange = saveTtsPref;
+    $('ttsRate').oninput = () => { $('ttsRateVal').textContent = Number($('ttsRate').value).toFixed(1); saveTtsPref(); };
+    $('btnTtsTest').onclick = () => speak(($('ttsTemplate').value || DEFAULT_THANKS).replace(/\{name\}/g, 'Nguyen Van An'));
 
     // ===================== TAB =====================
     function showTab(tab) {

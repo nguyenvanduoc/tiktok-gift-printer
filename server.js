@@ -34,6 +34,7 @@ const DEFAULTS = {
   autoPrint: true, // tự động in khi có quà
   oncePerUser: true, // mỗi người chỉ in 1 lần
   minDiamonds: 1, // giá trị quà tối thiểu (kim cương, tính cả combo)
+  thanksTemplate: 'Thank you {name}! Here is a photo for you.', // câu đọc cảm ơn, {name} = tên người tặng
 };
 let settings = { ...DEFAULTS };
 try {
@@ -56,6 +57,7 @@ function updateSettings(patch = {}) {
   if (typeof patch.autoPrint === 'boolean') settings.autoPrint = patch.autoPrint;
   if (typeof patch.oncePerUser === 'boolean') settings.oncePerUser = patch.oncePerUser;
   if (Number.isFinite(Number(patch.minDiamonds))) settings.minDiamonds = Math.max(0, Number(patch.minDiamonds));
+  if (typeof patch.thanksTemplate === 'string') settings.thanksTemplate = patch.thanksTemplate.slice(0, 200).trim() || DEFAULTS.thanksTemplate;
   saveSettings();
 }
 
@@ -124,7 +126,41 @@ function handleGift(g, { force = false } = {}) {
     io.emit('stats-changed');
   }
 
-  if (!reason) sendToPrinter(rec);
+  if (!reason) {
+    sendToPrinter(rec);
+    speakThanks(rec);
+  }
+}
+
+// =============================================================
+// 3b. ĐỌC LỜI CẢM ƠN (giọng tiếng Anh, phát trên trình duyệt đang bật "loa")
+// =============================================================
+// Tên đọc bằng giọng tiếng Anh: bỏ dấu tiếng Việt (Được -> Duoc), bỏ emoji/ký hiệu, tối đa 30 ký tự.
+// Tên không còn chữ (toàn emoji, chữ Hàn...) -> dùng @username nếu dễ đọc, không thì "my friend".
+function speakableName(g) {
+  const clean = (s) =>
+    String(s || '')
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '') // bỏ dấu
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .replace(/[^A-Za-z0-9 .'-]/g, ' ') // chỉ giữ chữ Latin, số
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 30);
+  const nick = clean(g.nickname);
+  if (/[A-Za-z]{2,}/.test(nick)) return nick;
+  const handle = clean(String(g.uniqueId).replace(/[._]/g, ' '));
+  if (/[A-Za-z]{2,}/.test(handle) && !/^user\s?\d+$/i.test(handle)) return handle; // "user123456789" đọc rất dài -> bỏ
+  return 'my friend';
+}
+
+let speakerId = null; // socket.id của tab đang làm "loa" (chỉ 1 tab đọc để không bị đọc chồng)
+
+function speakThanks(g) {
+  if (!speakerId) return;
+  const text = settings.thanksTemplate.replace(/\{name\}/g, speakableName(g));
+  io.to(speakerId).emit('speak', { text });
 }
 
 async function sendToPrinter(rec) {
@@ -351,6 +387,23 @@ io.on('connection', (socket) => {
   });
 
   socket.on('reset-printed', () => printedUsers.clear());
+
+  // Tab bật "Đọc lời cảm ơn" -> trở thành loa duy nhất; tab loa cũ tự tắt
+  socket.emit('speaker', { id: speakerId });
+  socket.on('claim-speaker', () => {
+    speakerId = socket.id;
+    io.emit('speaker', { id: speakerId });
+  });
+  socket.on('release-speaker', () => {
+    if (speakerId === socket.id) speakerId = null;
+    io.emit('speaker', { id: speakerId });
+  });
+  socket.on('disconnect', () => {
+    if (speakerId === socket.id) {
+      speakerId = null;
+      io.emit('speaker', { id: null });
+    }
+  });
 
   // Reset quà tặng: xoá danh sách quà + bộ đếm quà + danh sách "đã in" -> bắt đầu lại từ đầu.
   // Không ảnh hưởng kết nối live và các lệnh in đang chạy dở.

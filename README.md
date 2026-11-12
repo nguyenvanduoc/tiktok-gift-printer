@@ -75,3 +75,17 @@ Mọi quà nhận được đều được ghi lại **vĩnh viễn** vào file 
 - Ngày được tính theo giờ máy tính (quà lúc 23:59 thuộc hôm đó, 00:01 thuộc hôm sau). Lượt **In thử** không được tính.
 - Muốn xoá hết thống kê: tắt chương trình rồi xoá file `data/gift-log.jsonl`.
 
+## 6. 🔊 Đọc lời cảm ơn
+
+Khi có quà **được in**, máy tính đọc to (giọng tiếng Anh): *"Thank you {tên}! Here is a photo for you."*
+
+1. Ở tab **Live**, khung **🔊 Đọc lời cảm ơn**: tick **Bật đọc trên máy này**.
+2. Chọn **Giọng đọc** (khuyên dùng `Google US English`, tự nhiên nhất) và **Tốc độ**, bấm **▶️ Đọc thử**.
+3. Muốn đổi câu: sửa ô **Câu đọc**, `{name}` sẽ được thay bằng tên người tặng.
+
+- Mở trang trên **máy đang phát live** để tiếng được thu vào live (phần mềm live phải thu âm thanh máy tính, ví dụ TikTok LIVE Studio / OBS: *Desktop Audio*).
+- **Chỉ 1 tab đọc** (tab bật sau cùng) để không bị đọc chồng. Đóng tab đó thì không đọc nữa (vẫn in bình thường).
+- Tải lại trang: trình duyệt bắt buộc phải bấm vào trang 1 lần mới cho phát tiếng, nên bấm vào bất kỳ chỗ nào để bật lại.
+- Tên tiếng Việt được bỏ dấu cho giọng tiếng Anh đọc tự nhiên (Được → Duoc), bỏ emoji. Tên toàn emoji/chữ nước ngoài thì đọc username, hoặc "my friend".
+- Người bị bỏ qua (đã in rồi, dưới mức quà tối thiểu) thì không đọc.
+
