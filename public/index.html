@@ -55,6 +55,7 @@
         <button id="btnDisconnect">Ngắt</button>
       </div>
       <div class="status"><span id="dot" class="dot"></span><span id="statusText">Chưa kết nối</span></div>
+      <p class="hint" id="health" style="margin-top:6px"></p>
       <p class="hint" style="margin-top:10px">Có thể bấm Kết nối trước khi lên live, hệ thống sẽ tự chờ và tự kết nối khi bạn bắt đầu live.</p>
     </div>
 
@@ -155,6 +156,12 @@
     });
     $('btnConnect').onclick = () =>
       socket.emit('connect-live', $('username').value.trim(), (res) => { if (!res.ok) alert(res.error); });
+    // Sức khoẻ kết nối: số người xem + dữ liệu mới nhất cách đây bao lâu (server gửi mỗi 15 giây)
+    socket.on('health', (h) => {
+      if (!h) { $('health').textContent = ''; return; }
+      const ago = Math.max(0, Math.round((h.now - h.lastDataAt) / 1000));
+      $('health').textContent = `👁 ${h.viewers ?? '?'} người xem • 🎁 ${h.gifts} lượt quà • dữ liệu mới nhất ${ago}s trước`;
+    });
     $('btnDisconnect').onclick = () => socket.emit('disconnect-live');
     $('btnTest').onclick = () => socket.emit('test-print');
     $('btnReset').onclick = () => socket.emit('reset-printed');

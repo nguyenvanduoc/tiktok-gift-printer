@@ -147,6 +147,10 @@ let retryTimer = null;
 let retryCount = 0;
 let lastStatus = { state: 'disconnected', message: 'Chưa kết nối' };
 
+// Theo dõi "sức khoẻ" kết nối: thời điểm nhận dữ liệu gần nhất, số người xem, số quà
+const health = { lastDataAt: 0, viewers: null, gifts: 0, connectedAt: 0 };
+const STALE_MS = 120000; // 2 phút không có dữ liệu nào -> coi như kết nối chết -> kết nối lại
+
 function setStatus(state, message) {
   lastStatus = { state, user: settings.username, message };
   io.emit('status', lastStatus);
@@ -178,7 +182,12 @@ async function openConnection() {
   const conn = new TikTokLiveConnection(user, { processInitialData: false });
   live = conn;
 
+  // Mọi gói dữ liệu từ TikTok (kể cả bình luận, tim, người vào phòng...) -> kết nối còn sống
+  conn.on(ControlEvent.WEBSOCKET_DATA, () => (health.lastDataAt = Date.now()));
+  conn.on(WebcastEvent.ROOM_USER, (d) => (health.viewers = Number(d.total) || health.viewers));
+
   conn.on(WebcastEvent.GIFT, (data) => {
+    health.gifts++;
     const g = parseGift(data);
     // gift.type 1 = quà combo: trong lúc bấm liên tục TikTok gửi nhiều sự kiện,
     // chỉ xử lý sự kiện cuối (repeatEnd = true) để không in trùng.
@@ -209,6 +218,7 @@ async function openConnection() {
     const state = await conn.connect();
     if (live !== conn) return; // đã bị ngắt/đổi tài khoản trong lúc đang kết nối
     retryCount = 0;
+    Object.assign(health, { lastDataAt: Date.now(), connectedAt: Date.now(), viewers: null, gifts: 0 });
     setStatus('connected', `Đã kết nối @${user} (phòng ${state.roomId}). Có quà là tự in.`);
   } catch (e) {
     if (live !== conn) return;
@@ -242,6 +252,19 @@ function stopLive() {
   saveSettings();
   setStatus('disconnected', 'Đã ngắt kết nối');
 }
+
+// Watchdog: 15 giây kiểm tra 1 lần. Kết nối "chết lặng" (không báo ngắt nhưng không còn dữ liệu)
+// -> tự kết nối lại. Đồng thời gửi số người xem / thời điểm dữ liệu mới nhất lên giao diện.
+setInterval(() => {
+  const connected = lastStatus.state === 'connected' && live;
+  if (connected && Date.now() - health.lastDataAt > STALE_MS) {
+    console.warn('[watchdog] 2 phút không nhận được dữ liệu từ TikTok -> kết nối lại');
+    setStatus('reconnecting', 'Không nhận được dữ liệu từ TikTok, đang kết nối lại...');
+    retryCount = 0;
+    openConnection();
+  }
+  io.emit('health', connected ? { ...health, now: Date.now() } : null);
+}, 15000);
 
 // =============================================================
 // 5. PROXY ẢNH AVATAR cho giao diện (CDN TikTok chặn web khác lấy ảnh trực tiếp)

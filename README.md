@@ -24,6 +24,7 @@ TikTok LIVE ──(có người tặng quà)──> server (npm start) ──(t�
 - **Server tự in**: đóng trang web vẫn in bình thường, mở nhiều tab cũng không in trùng. Chỉ cần cửa sổ `npm start` còn chạy.
 - **Bấm Kết nối trước khi lên live cũng được**: hệ thống kiểm tra mỗi 30 giây, bạn lên live là tự kết nối.
 - **Rớt mạng / TikTok ngắt kết nối**: tự kết nối lại.
+- **Kết nối "chết lặng"** (không báo ngắt nhưng 2 phút không có dữ liệu): tự kết nối lại. Dưới trạng thái có dòng `👁 người xem • 🎁 lượt quà • dữ liệu mới nhất Ns trước` để biết kết nối còn sống.
 - **Tắt rồi mở lại `npm start`**: tự kết nối lại tài khoản lần trước. Cài đặt được lưu trong `settings.json`.
 - **Quà combo** (bấm liên tục): chỉ in 1 lần, khi kết thúc combo.
 - **Avatar**: tự lấy ảnh lớn 1080px từ trang cá nhân để in nét, không lấy được thì dùng ảnh nhỏ.
