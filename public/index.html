@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TikTok Gift Printer</title>
+  <style>
+    :root { --bg:#0f1115; --card:#181b22; --line:#2a2f3a; --text:#e8eaf0; --muted:#8a93a6; --accent:#fe2c55; --ok:#25c26e; --warn:#f5a623; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 20px 16px; display:grid; gap:16px; grid-template-columns: 1fr 1fr; }
+    @media (max-width: 760px) { .wrap { grid-template-columns: 1fr; } }
+    h1 { grid-column: 1/-1; margin: 0; font-size: 22px; }
+    h1 span { color: var(--accent); }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+    .card h2 { margin:0 0 12px; font-size:15px; color:var(--muted); font-weight:600; }
+    .row { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap: wrap; }
+    input[type=text], input[type=number], select { background:#0c0e12; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 10px; font-size:14px; }
+    input[type=text] { flex:1; min-width: 140px; }
+    input[type=number] { width: 90px; }
+    button { border:0; border-radius:8px; padding:9px 14px; font-size:14px; font-weight:600; cursor:pointer; background:#2a2f3a; color:var(--text); }
+    button.primary { background: var(--accent); color:#fff; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    label { font-size:14px; display:flex; gap:6px; align-items:center; }
+    .status { display:inline-flex; align-items:center; gap:8px; font-size:14px; }
+    .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+    .dot.connected { background: var(--ok); } .dot.connecting { background: var(--warn); } .dot.error { background: var(--accent); }
+    .log { list-style:none; margin:0; padding:0; max-height: 420px; overflow:auto; }
+    .log li { display:flex; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
+    .log img { width:36px; height:36px; border-radius:50%; object-fit:cover; background:#333; }
+    .log .meta { flex:1; min-width:0; }
+    .log .meta b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .log .meta small { color:var(--muted); }
+    .tag { font-size:12px; padding:2px 8px; border-radius:99px; background:#2a2f3a; color:var(--muted); white-space:nowrap; }
+    .tag.printed { background:#123d27; color:var(--ok); } .tag.skipped { background:#3a2a10; color:var(--warn); }
+    .hint { font-size:13px; color:var(--muted); line-height:1.5; }
+    code { background:#0c0e12; padding:1px 5px; border-radius:4px; }
+
+    /* ---------- Vùng in (ẩn trên màn hình, chỉ hiện khi in) ---------- */
+    #print-area { display:none; }
+    @media print {
+      body { background:#fff; }
+      .wrap { display:none !important; }
+      #print-area { display:flex; flex-direction:column; align-items:center; width: var(--paper-w, 58mm); padding: 3mm 0 6mm; color:#000; font-family: Arial, sans-serif; }
+      #print-area img { width: calc(var(--paper-w, 58mm) - 10mm); height: calc(var(--paper-w, 58mm) - 10mm); border-radius:50%; object-fit:cover; filter: grayscale(1) contrast(1.25); border: .6mm solid #000; }
+      #print-area .name { margin-top: 2mm; font-size: 12pt; font-weight: 700; text-align:center; max-width: 90%; word-break: break-all; }
+      #print-area .gift { font-size: 9pt; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🎁 TikTok <span>Gift Printer</span></h1>
+
+    <!-- Kết nối -->
+    <div class="card">
+      <h2>Kết nối LIVE</h2>
+      <div class="row">
+        <input id="username" type="text" placeholder="username TikTok đang live (vd: abc123)" />
+        <button id="btnConnect" class="primary">Kết nối</button>
+        <button id="btnDisconnect">Ngắt</button>
+      </div>
+      <div class="status"><span id="dot" class="dot"></span><span id="statusText">Chưa kết nối</span></div>
+    </div>
+
+    <!-- Cài đặt in -->
+    <div class="card">
+      <h2>Cài đặt in</h2>
+      <div class="row"><label><input id="autoPrint" type="checkbox" checked /> Tự động in khi có quà</label></div>
+      <div class="row"><label><input id="oncePerUser" type="checkbox" checked /> Mỗi người chỉ in 1 lần</label></div>
+      <div class="row"><label>Quà tối thiểu <input id="minDiamonds" type="number" min="0" value="1" /> 💎 (tính cả combo)</label></div>
+      <div class="row"><label>Khổ giấy
+        <select id="paper"><option value="58mm">58mm</option><option value="80mm">80mm</option><option value="50mm">50mm</option></select></label>
+      </div>
+      <div class="row">
+        <button id="btnTest">🖨️ In thử</button>
+        <button id="btnReset">Xoá danh sách đã in</button>
+        <span class="hint">Hàng chờ: <b id="queueLen">0</b></span>
+      </div>
+    </div>
+
+    <!-- Nhật ký quà -->
+    <div class="card" style="grid-column:1/-1">
+      <h2>Quà nhận được</h2>
+      <ul id="log" class="log"></ul>
+      <p class="hint">
+        In không cần hộp thoại: mở Chrome bằng cờ <code>--kiosk-printing</code> và đặt máy in nhiệt làm máy in mặc định (xem README).
+      </p>
+    </div>
+  </div>
+
+  <!-- Nội dung sẽ được in -->
+  <div id="print-area">
+    <img id="printImg" alt="" />
+    <div class="name" id="printName"></div>
+    <div class="gift" id="printGift"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const socket = io();
+
+    // ---------------- Lưu cài đặt ----------------
+    const SETTINGS = ['username', 'autoPrint', 'oncePerUser', 'minDiamonds', 'paper'];
+    function saveSettings() {
+      try {
+        const s = {};
+        SETTINGS.forEach((k) => (s[k] = $(k).type === 'checkbox' ? $(k).checked : $(k).value));
+        localStorage.setItem('gp-settings', JSON.stringify(s));
+      } catch (_) {}
+    }
+    try {
+      const s = JSON.parse(localStorage.getItem('gp-settings') || '{}');
+      SETTINGS.forEach((k) => { if (k in s) $(k).type === 'checkbox' ? ($(k).checked = s[k]) : ($(k).value = s[k]); });
+    } catch (_) {}
+    SETTINGS.forEach((k) => $(k).addEventListener('change', saveSettings));
+    // @page không đọc được biến CSS -> tạo thẻ <style> riêng cho khổ giấy
+    const pageStyle = document.createElement('style'); document.head.appendChild(pageStyle);
+    const applyPaper = () => {
+      const w = $('paper').value;
+      document.documentElement.style.setProperty('--paper-w', w);
+      pageStyle.textContent = `@page { size: ${w} ${parseInt(w) + 22}mm; margin: 0; }`;
+    };
+    $('paper').addEventListener('change', applyPaper); applyPaper();
+
+    // ---------------- Trạng thái kết nối ----------------
+    socket.on('status', ({ state, message, user }) => {
+      $('dot').className = 'dot ' + state;
+      const label = { connected: 'Đã kết nối', connecting: 'Đang kết nối...', disconnected: 'Chưa kết nối', ended: 'Live đã kết thúc', error: 'Lỗi' }[state] || state;
+      $('statusText').textContent = message || (user && state === 'connected' ? `${label} @${user}` : label);
+      $('btnConnect').disabled = state === 'connecting';
+    });
+
+    $('btnConnect').onclick = () => {
+      saveSettings();
+      socket.emit('connect-live', $('username').value.trim(), (res) => { if (!res.ok) alert('Không kết nối được: ' + res.error); });
+    };
+    $('btnDisconnect').onclick = () => socket.emit('disconnect-live');
+    $('btnTest').onclick = () => socket.emit('test-gift');
+
+    // ---------------- Danh sách đã in (chống in trùng) ----------------
+    let printedUsers = new Set();
+    try { printedUsers = new Set(JSON.parse(sessionStorage.getItem('gp-printed') || '[]')); } catch (_) {}
+    const savePrinted = () => { try { sessionStorage.setItem('gp-printed', JSON.stringify([...printedUsers])); } catch (_) {} };
+    $('btnReset').onclick = () => { printedUsers.clear(); savePrinted(); };
+
+    // Ảnh mẫu cho nút "In thử"
+    const SAMPLE_AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#ddd"/><circle cx="50" cy="38" r="18" fill="#555"/><ellipse cx="50" cy="88" rx="32" ry="24" fill="#555"/></svg>');
+
+    const avatarSrc = (g) => g.avatar ? '/avatar?url=' + encodeURIComponent(g.avatar) : SAMPLE_AVATAR;
+
+    // ---------------- Nhận quà ----------------
+    socket.on('gift', (g) => {
+      const total = (g.diamondCount || 0) * (g.repeatCount || 1);
+      let reason = null;
+      if (!g.test) {
+        if (total < Number($('minDiamonds').value || 0)) reason = 'dưới mức tối thiểu';
+        else if ($('oncePerUser').checked && printedUsers.has(g.uniqueId)) reason = 'đã in rồi';
+      }
+      if (!$('autoPrint').checked && !g.test) reason = 'tắt tự động in';
+
+      const li = addLog(g, total, reason);
+      if (!reason) {
+        printedUsers.add(g.uniqueId); savePrinted();
+        enqueue(g, li);
+      }
+    });
+
+    function addLog(g, total, reason) {
+      const li = document.createElement('li');
+      const img = document.createElement('img'); img.src = avatarSrc(g);
+      const meta = document.createElement('div'); meta.className = 'meta';
+      const b = document.createElement('b'); b.textContent = `${g.nickname} (@${g.uniqueId})`;
+      const small = document.createElement('small');
+      small.textContent = `${g.repeatCount}x ${g.giftName} • ${total} 💎 • ${new Date(g.time).toLocaleTimeString()}`;
+      meta.append(b, small);
+      const tag = document.createElement('span');
+      tag.className = 'tag' + (reason ? ' skipped' : '');
+      tag.textContent = reason ? 'Bỏ qua: ' + reason : 'Chờ in';
+      // Cho phép bấm "In" thủ công với quà bị bỏ qua
+      if (reason) { tag.style.cursor = 'pointer'; tag.title = 'Bấm để in'; tag.onclick = () => enqueue(g, li); }
+      li.append(img, meta, tag);
+      $('log').prepend(li);
+      return li;
+    }
+
+    // ---------------- Hàng chờ in (in lần lượt từng người) ----------------
+    const queue = [];
+    let printing = false;
+
+    function enqueue(g, li) {
+      queue.push({ g, li });
+      $('queueLen').textContent = queue.length;
+      processQueue();
+    }
+
+    function loadImage(img, src) {
+      return new Promise((resolve) => {
+        const done = () => resolve();
+        img.onload = done; img.onerror = () => { img.src = SAMPLE_AVATAR; };
+        img.src = src;
+        setTimeout(done, 5000); // tối đa chờ 5s
+      });
+    }
+
+    async function processQueue() {
+      if (printing || !queue.length) return;
+      printing = true;
+      const { g, li } = queue.shift();
+      $('queueLen').textContent = queue.length;
+
+      $('printName').textContent = g.nickname || '@' + g.uniqueId;
+      $('printGift').textContent = `@${g.uniqueId} • ${g.repeatCount}x ${g.giftName}`;
+      await loadImage($('printImg'), avatarSrc(g));
+
+      window.print(); // Chrome --kiosk-printing: in thẳng, không hiện hộp thoại
+
+      const tag = li.querySelector('.tag');
+      tag.className = 'tag printed'; tag.textContent = 'Đã in'; tag.onclick = null; tag.style.cursor = '';
+      await new Promise((r) => setTimeout(r, 800)); // nghỉ chút giữa 2 lần in
+      printing = false;
+      processQueue();
+    }
+  </script>
+</body>
+</html>
