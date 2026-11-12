@@ -11,6 +11,7 @@ import express from 'express';
 import { Server } from 'socket.io';
 import { TikTokLiveConnection, WebcastEvent, ControlEvent, UserOfflineError } from 'tiktok-live-connector';
 import { listPrinters, printGift } from './printer.js';
+import { initStats, logGift, logPrint, getOverview, getDay, getDayCsv } from './stats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -24,6 +25,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // 1. CÀI ĐẶT (lưu ra file settings.json để tắt/mở lại server vẫn còn)
 // =============================================================
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+initStats(path.join(__dirname, 'data')); // thống kê lưu trong thư mục data/
 const DEFAULTS = {
   username: '', // tài khoản TikTok đang live
   autoConnect: false, // true = đang bật kết nối -> server khởi động lại sẽ tự kết nối lại
@@ -116,6 +118,12 @@ function handleGift(g, { force = false } = {}) {
   io.emit('gift', rec);
   console.log(`[gift] @${g.uniqueId} tặng ${g.repeatCount}x ${g.giftName} (${total} 💎) -> ${reason ? 'bỏ qua: ' + reason : 'IN'}`);
 
+  // Ghi vào thống kê vĩnh viễn (không ghi lượt in thử)
+  if (!g.test) {
+    logGift(rec, { room: settings.username, status: rec.status, reason });
+    io.emit('stats-changed');
+  }
+
   if (!reason) sendToPrinter(rec);
 }
 
@@ -129,6 +137,10 @@ async function sendToPrinter(rec) {
   try {
     await printGift(rec, { printer: settings.printer, paperMm: settings.paperMm });
     updateRecord(rec, { status: 'printed' });
+    if (!rec.test) {
+      logPrint(rec.uniqueId, true);
+      io.emit('stats-changed');
+    }
   } catch (e) {
     printedUsers.delete(rec.uniqueId); // in lỗi -> cho phép in lại lần sau
     console.error('[print error]', e?.message || e);
@@ -283,6 +295,22 @@ app.get('/avatar', async (req, res) => {
   } catch (e) {
     res.status(400).send('Lỗi: ' + e.message);
   }
+});
+
+// =============================================================
+// 5b. API THỐNG KÊ (tab "Thống kê" trên giao diện gọi tới)
+//   GET /api/stats              -> tổng quan: hôm nay, 7 ngày, tổng cộng, danh sách các ngày
+//   GET /api/stats/2026-11-12   -> chi tiết 1 ngày: top người tặng, loại quà, danh sách
+//   GET /api/stats/2026-11-12.csv -> tải file Excel (CSV) của ngày đó
+// =============================================================
+app.get('/api/stats', (req, res) => res.json(getOverview()));
+
+app.get(/^\/api\/stats\/(\d{4}-\d{2}-\d{2})(\.csv)?$/, (req, res) => {
+  const [date, csv] = [req.params[0], req.params[1]];
+  if (!csv) return res.json(getDay(date));
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="qua-tang-${date}.csv"`);
+  res.send(getDayCsv(date));
 });
 
 // =============================================================

@@ -59,4 +59,19 @@ TikTok LIVE ──(có người tặng quà)──> server (npm start) ──(t�
 | Máy in | Chọn máy in nhiệt thật, không chọn máy in PDF |
 | Khổ giấy | 50 / 58 / 80mm |
 | Bấm vào nhãn "Đã in" / "Bỏ qua" / "Lỗi in" | In lại người đó |
-| 🗑️ Reset quà tặng | Xoá danh sách quà, đưa bộ đếm lượt quà về 0, mọi người đều được in lại từ đầu. Kết nối live vẫn giữ |
+| 🗑️ Reset quà tặng | Xoá danh sách quà trên tab Live, đưa bộ đếm lượt quà về 0, mọi người đều được in lại từ đầu. Kết nối live và **tab Thống kê vẫn giữ nguyên** |
+
+## 5. Tab 📊 Thống kê
+
+Mọi quà nhận được đều được ghi lại **vĩnh viễn** vào file `data/gift-log.jsonl` (bấm Reset hay tắt chương trình cũng không mất).
+
+- **Hôm nay / 7 ngày qua / Tổng cộng**: tổng 💎, số lượt tặng, số quà, số người tặng.
+- **Theo ngày**: mỗi ngày 1 dòng (lượt tặng, số quà, 💎, người tặng, số tờ đã in). Bấm vào 1 ngày để xem chi tiết:
+  - 🏆 Top người tặng (xếp theo 💎)
+  - 🎁 Thống kê theo loại quà
+  - 🕒 Danh sách theo giờ
+  - ⬇️ **Tải Excel (CSV)** của ngày đó
+- Đang mở tab Thống kê mà có quà mới thì số liệu tự cập nhật.
+- Ngày được tính theo giờ máy tính (quà lúc 23:59 thuộc hôm đó, 00:01 thuộc hôm sau). Lượt **In thử** không được tính.
+- Muốn xoá hết thống kê: tắt chương trình rồi xoá file `data/gift-log.jsonl`.
+
