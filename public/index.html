@@ -40,6 +40,11 @@
     .tag.clickable { cursor:pointer; text-decoration: underline dotted; }
     .hint { font-size:13px; color:var(--muted); line-height:1.5; margin: 0; }
     .warn { color: var(--warn); }
+    .card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+    .card-head h2 { margin:0; }
+    button.danger { background:#3d1220; color:#ff7a93; }
+    button.danger:hover { background:#55182c; }
+    .empty { color:var(--muted); font-size:14px; padding:12px 0; }
   </style>
 </head>
 <body>
@@ -81,8 +86,12 @@
 
     <!-- Nhật ký quà -->
     <div class="card" style="grid-column:1/-1">
-      <h2>Quà nhận được</h2>
+      <div class="card-head">
+        <h2>Quà nhận được (<span id="giftCount">0</span>)</h2>
+        <button id="btnResetGifts" class="danger" title="Xoá danh sách quà, số lượt quà và danh sách đã in">🗑️ Reset quà tặng</button>
+      </div>
       <ul id="log" class="log"></ul>
+      <p id="emptyLog" class="empty">Chưa có quà nào.</p>
       <p class="hint" style="margin-top:10px">
         Việc in do <b>server</b> tự làm: đóng trang này vẫn in bình thường (chỉ cần cửa sổ <code>npm start</code> còn chạy).
         Bấm vào nhãn "Bỏ qua" / "Lỗi" / "Đã in" để in lại người đó.
@@ -197,8 +206,20 @@
       atTop ? $('log').prepend(li) : $('log').append(li);
     }
 
-    socket.on('history', (list) => { $('log').innerHTML = ''; rows.clear(); list.forEach((g) => addRow(g, false)); });
-    socket.on('gift', (g) => addRow(g));
+    // Số dòng quà + dòng "Chưa có quà nào" khi danh sách trống
+    function updateCount() {
+      $('giftCount').textContent = rows.size;
+      $('emptyLog').style.display = rows.size ? 'none' : '';
+    }
+    socket.on('history', (list) => { $('log').innerHTML = ''; rows.clear(); list.forEach((g) => addRow(g, false)); updateCount(); });
+    socket.on('gift', (g) => { addRow(g); updateCount(); });
+
+    // Reset quà tặng (hỏi lại trước khi xoá)
+    $('btnResetGifts').onclick = () => {
+      if (confirm('Xoá toàn bộ danh sách quà tặng?\n\n- Danh sách quà bên dưới bị xoá\n- Bộ đếm lượt quà về 0\n- Mọi người đều có thể được in lại\n\nKết nối live vẫn giữ nguyên.')) {
+        socket.emit('reset-gifts');
+      }
+    };
     socket.on('gift-update', (u) => { const li = rows.get(u.id); if (li) renderTag(li, u); });
   </script>
 </body>

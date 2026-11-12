@@ -324,6 +324,16 @@ io.on('connection', (socket) => {
 
   socket.on('reset-printed', () => printedUsers.clear());
 
+  // Reset quà tặng: xoá danh sách quà + bộ đếm quà + danh sách "đã in" -> bắt đầu lại từ đầu.
+  // Không ảnh hưởng kết nối live và các lệnh in đang chạy dở.
+  socket.on('reset-gifts', () => {
+    history.length = 0;
+    printedUsers.clear();
+    health.gifts = 0;
+    io.emit('history', []); // mọi tab đang mở cùng xoá danh sách
+    console.log('[reset] Đã xoá danh sách quà tặng');
+  });
+
   // In thử (không cần đang live)
   socket.on('test-print', () =>
     handleGift(

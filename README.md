@@ -59,3 +59,4 @@ TikTok LIVE ──(có người tặng quà)──> server (npm start) ──(t�
 | Máy in | Chọn máy in nhiệt thật, không chọn máy in PDF |
 | Khổ giấy | 50 / 58 / 80mm |
 | Bấm vào nhãn "Đã in" / "Bỏ qua" / "Lỗi in" | In lại người đó |
+| 🗑️ Reset quà tặng | Xoá danh sách quà, đưa bộ đếm lượt quà về 0, mọi người đều được in lại từ đầu. Kết nối live vẫn giữ |
