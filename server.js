@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Server } from 'socket.io';
 import { TikTokLiveConnection, WebcastEvent, ControlEvent } from 'tiktok-live-connector';
+import { listPrinters, printGift } from './printer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -133,6 +134,26 @@ io.on('connection', (socket) => {
   socket.on('disconnect-live', async (ack) => {
     await disconnectLive();
     ack?.({ ok: true });
+  });
+
+  // Lấy danh sách máy in đã cài trên máy tính (để chọn trong giao diện)
+  socket.on('list-printers', async (ack) => {
+    try {
+      ack?.({ ok: true, ...(await listPrinters()) });
+    } catch (e) {
+      ack?.({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // In trực tiếp ra máy in đã chọn (không qua hộp thoại in của Chrome)
+  socket.on('print-gift', async ({ gift, printer, paperMm }, ack) => {
+    try {
+      await printGift(gift, { printer, paperMm: Number(paperMm) || 58 });
+      ack?.({ ok: true });
+    } catch (e) {
+      console.error('[print error]', e);
+      ack?.({ ok: false, error: e?.message || String(e) });
+    }
   });
 
   // Giả lập 1 lượt tặng quà để test máy in mà không cần đang live

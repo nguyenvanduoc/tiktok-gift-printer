@@ -66,6 +66,17 @@
     <!-- Cài đặt in -->
     <div class="card">
       <h2>Cài đặt in</h2>
+      <div class="row"><label>Cách in
+        <select id="printMode">
+          <option value="direct">Gửi thẳng tới máy in (khuyên dùng)</option>
+          <option value="browser">Qua hộp thoại in của Chrome</option>
+        </select></label>
+      </div>
+      <div class="row" id="printerRow">
+        <label>Máy in <select id="printer" style="max-width:230px"><option value="">Đang tải...</option></select></label>
+        <button id="btnRefreshPrinters" title="Tải lại danh sách máy in">↻</button>
+      </div>
+      <p class="hint" id="printerWarn" style="margin:-4px 0 10px;color:var(--warn)"></p>
       <div class="row"><label><input id="autoPrint" type="checkbox" checked /> Tự động in khi có quà</label></div>
       <div class="row"><label><input id="oncePerUser" type="checkbox" checked /> Mỗi người chỉ in 1 lần</label></div>
       <div class="row"><label>Quà tối thiểu <input id="minDiamonds" type="number" min="0" value="1" /> 💎 (tính cả combo)</label></div>
@@ -84,7 +95,7 @@
       <h2>Quà nhận được</h2>
       <ul id="log" class="log"></ul>
       <p class="hint">
-        In không cần hộp thoại: mở Chrome bằng cờ <code>--kiosk-printing</code> và đặt máy in nhiệt làm máy in mặc định (xem README).
+        Chế độ <b>Gửi thẳng tới máy in</b>: server in ra máy in đã chọn, không cần hộp thoại, không mở file PDF. Không được chọn "Microsoft Print to PDF".
       </p>
     </div>
   </div>
@@ -102,7 +113,7 @@
     const socket = io();
 
     // ---------------- Lưu cài đặt ----------------
-    const SETTINGS = ['username', 'autoPrint', 'oncePerUser', 'minDiamonds', 'paper'];
+    const SETTINGS = ['username', 'autoPrint', 'oncePerUser', 'minDiamonds', 'paper', 'printMode', 'printer'];
     function saveSettings() {
       try {
         const s = {};
@@ -123,6 +134,42 @@
       pageStyle.textContent = `@page { size: ${w} ${parseInt(w) + 22}mm; margin: 0; }`;
     };
     $('paper').addEventListener('change', applyPaper); applyPaper();
+
+    // ---------------- Danh sách máy in (lấy từ server) ----------------
+    let savedPrinter = $('printer').value;
+    try { savedPrinter = JSON.parse(localStorage.getItem('gp-settings') || '{}').printer || ''; } catch (_) {}
+    const isPdfPrinter = (n) => /pdf|xps|onenote|fax/i.test(n || '');
+
+    function loadPrinters() {
+      socket.emit('list-printers', (res) => {
+        const sel = $('printer');
+        sel.innerHTML = '';
+        if (!res.ok || !res.printers.length) {
+          sel.innerHTML = '<option value="">(không tìm thấy máy in)</option>';
+          $('printerWarn').textContent = res.ok ? 'Chưa có máy in nào được cài trên máy tính.' : 'Lỗi lấy danh sách máy in: ' + res.error;
+          return;
+        }
+        res.printers.forEach((name) => {
+          const o = document.createElement('option');
+          o.value = name; o.textContent = name + (name === res.defaultPrinter ? ' (mặc định)' : '') + (isPdfPrinter(name) ? ' ⚠️ PDF' : '');
+          sel.appendChild(o);
+        });
+        // Ưu tiên: máy đã chọn lần trước -> máy in thật đầu tiên -> máy mặc định
+        const real = res.printers.find((n) => !isPdfPrinter(n));
+        sel.value = res.printers.includes(savedPrinter) ? savedPrinter : (real || res.defaultPrinter || res.printers[0]);
+        savedPrinter = sel.value; saveSettings(); checkPrinter();
+      });
+    }
+    function checkPrinter() {
+      const direct = $('printMode').value === 'direct';
+      $('printerRow').style.display = direct ? '' : 'none';
+      $('printerWarn').textContent = direct && isPdfPrinter($('printer').value)
+        ? 'Máy in đang chọn là máy in ảo (ra file PDF), hãy chọn máy in nhiệt thật.' : '';
+    }
+    $('btnRefreshPrinters').onclick = loadPrinters;
+    $('printer').addEventListener('change', () => { savedPrinter = $('printer').value; checkPrinter(); });
+    $('printMode').addEventListener('change', checkPrinter);
+    socket.on('connect', loadPrinters);
 
     // ---------------- Trạng thái kết nối ----------------
     socket.on('status', ({ state, message, user }) => {
@@ -211,14 +258,29 @@
       const { g, li } = queue.shift();
       $('queueLen').textContent = queue.length;
 
-      $('printName').textContent = g.nickname || '@' + g.uniqueId;
-      $('printGift').textContent = `@${g.uniqueId} • ${g.repeatCount}x ${g.giftName}`;
-      await loadImage($('printImg'), avatarSrc(g));
-
-      window.print(); // Chrome --kiosk-printing: in thẳng, không hiện hộp thoại
-
       const tag = li.querySelector('.tag');
-      tag.className = 'tag printed'; tag.textContent = 'Đã in'; tag.onclick = null; tag.style.cursor = '';
+      tag.className = 'tag'; tag.textContent = 'Đang in...'; tag.onclick = null; tag.style.cursor = '';
+      let error = null;
+
+      if ($('printMode').value === 'direct') {
+        // Server tạo phiếu in rồi gửi thẳng tới máy in theo tên
+        const res = await new Promise((resolve) =>
+          socket.timeout(60000).emit('print-gift', { gift: g, printer: $('printer').value, paperMm: parseInt($('paper').value) },
+            (err, r) => resolve(err ? { ok: false, error: 'Server không phản hồi' } : r)));
+        if (!res.ok) error = res.error;
+      } else {
+        $('printName').textContent = g.nickname || '@' + g.uniqueId;
+        $('printGift').textContent = `@${g.uniqueId} • ${g.repeatCount}x ${g.giftName}`;
+        await loadImage($('printImg'), avatarSrc(g));
+        window.print(); // Chrome --kiosk-printing: in thẳng, không hiện hộp thoại
+      }
+
+      if (error) {
+        tag.className = 'tag skipped'; tag.textContent = 'Lỗi in - bấm in lại'; tag.title = error;
+        tag.style.cursor = 'pointer'; tag.onclick = () => enqueue(g, li);
+      } else {
+        tag.className = 'tag printed'; tag.textContent = 'Đã in';
+      }
       await new Promise((r) => setTimeout(r, 800)); // nghỉ chút giữa 2 lần in
       printing = false;
       processQueue();
