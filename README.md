@@ -4,7 +4,7 @@ Khi có người tặng quà trên TikTok LIVE, app sẽ in avatar (hình tròn,
 
 ## 1. Cài đặt và chạy
 
-Cần **Node.js 20 trở lên**.
+Cần **Node.js 22 trở lên** (bản LTS ở https://nodejs.org).
 
 ```bash
 npm install
