@@ -1,39 +1,258 @@
 // =============================================================
 //  TikTok Live Gift Printer - Server
-//  Kết nối TikTok LIVE -> nhận sự kiện tặng quà -> gửi xuống trình duyệt để in avatar
+//  TikTok LIVE -> sự kiện tặng quà -> SERVER tự quyết định & tự gửi lệnh in ra máy in
+//  (không phụ thuộc trình duyệt: đóng tab web vẫn in, mở nhiều tab cũng không in trùng)
 // =============================================================
+import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Server } from 'socket.io';
-import { TikTokLiveConnection, WebcastEvent, ControlEvent } from 'tiktok-live-connector';
+import { TikTokLiveConnection, WebcastEvent, ControlEvent, UserOfflineError } from 'tiktok-live-connector';
 import { listPrinters, printGift } from './printer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 const PORT = process.env.PORT || 3000;
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
-
 app.use(express.static(path.join(__dirname, 'public')));
 
-// -------------------------------------------------------------
-// Proxy ảnh avatar: CDN của TikTok hay chặn hotlink / CORS,
-// nên trình duyệt sẽ tải ảnh qua server mình.
-// Chỉ cho phép domain của TikTok để tránh bị lợi dụng làm open-proxy.
-// -------------------------------------------------------------
+// =============================================================
+// 1. CÀI ĐẶT (lưu ra file settings.json để tắt/mở lại server vẫn còn)
+// =============================================================
+const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+const DEFAULTS = {
+  username: '', // tài khoản TikTok đang live
+  autoConnect: false, // true = đang bật kết nối -> server khởi động lại sẽ tự kết nối lại
+  printer: '', // tên máy in
+  paperMm: 58, // khổ giấy
+  autoPrint: true, // tự động in khi có quà
+  oncePerUser: true, // mỗi người chỉ in 1 lần
+  minDiamonds: 1, // giá trị quà tối thiểu (kim cương, tính cả combo)
+};
+let settings = { ...DEFAULTS };
+try {
+  settings = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
+} catch (_) {}
+
+function saveSettings() {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  } catch (e) {
+    console.error('[settings] Không lưu được:', e.message);
+  }
+  io.emit('settings', settings);
+}
+
+// Chỉ nhận đúng các trường hợp lệ từ giao diện
+function updateSettings(patch = {}) {
+  if (typeof patch.printer === 'string') settings.printer = patch.printer;
+  if ([50, 58, 80].includes(Number(patch.paperMm))) settings.paperMm = Number(patch.paperMm);
+  if (typeof patch.autoPrint === 'boolean') settings.autoPrint = patch.autoPrint;
+  if (typeof patch.oncePerUser === 'boolean') settings.oncePerUser = patch.oncePerUser;
+  if (Number.isFinite(Number(patch.minDiamonds))) settings.minDiamonds = Math.max(0, Number(patch.minDiamonds));
+  saveSettings();
+}
+
+// =============================================================
+// 2. ĐỌC DỮ LIỆU SỰ KIỆN QUÀ
+// Dữ liệu thật (đã kiểm tra trên live thật) theo schema proto v3:
+//   user.displayId = @username, user.nickname, user.avatarThumb.urlList (ảnh 100x100)
+//   gift.name, gift.type (1 = quà combo), gift.diamondCount, repeatCount, repeatEnd, common.msgId
+// README của thư viện dùng tên cũ (uniqueId, giftDetails, profilePicture) -> đọc cả hai.
+// =============================================================
+const pickUrl = (img) => img?.urlList?.[0] || img?.url?.[0] || null;
+
+function parseGift(data) {
+  const u = data.user || {};
+  return {
+    msgId: data.common?.msgId || null,
+    uniqueId: u.uniqueId || u.displayId || u.id || 'unknown',
+    nickname: u.nickname || u.uniqueId || u.displayId || '',
+    avatar: pickUrl(u.avatarLarge) || pickUrl(u.avatarMedium) || pickUrl(u.avatarThumb) || pickUrl(u.profilePicture),
+    giftName: data.gift?.name || data.giftDetails?.giftName || data.extendedGiftInfo?.name || `Gift #${data.giftId}`,
+    giftType: data.gift?.type ?? data.giftDetails?.giftType,
+    diamondCount: data.gift?.diamondCount ?? data.giftDetails?.diamondCount ?? 0,
+    repeatCount: Number(data.repeatCount) || 1,
+    repeatEnd: Boolean(data.repeatEnd),
+    time: Date.now(),
+  };
+}
+
+// =============================================================
+// 3. XỬ LÝ QUÀ -> QUYẾT ĐỊNH IN -> GỬI LỆNH IN
+// =============================================================
+const history = []; // 100 quà gần nhất (để giao diện hiển thị, in lại)
+const printedUsers = new Set(); // người đã được in (cho chế độ "mỗi người 1 lần")
+const seenMsgIds = new Set(); // chống sự kiện trùng
+let seq = 0;
+
+function updateRecord(rec, patch) {
+  Object.assign(rec, patch);
+  io.emit('gift-update', { id: rec.id, status: rec.status, reason: rec.reason, error: rec.error });
+}
+
+function handleGift(g, { force = false } = {}) {
+  if (g.msgId) {
+    if (seenMsgIds.has(g.msgId)) return;
+    if (seenMsgIds.size > 5000) seenMsgIds.clear();
+    seenMsgIds.add(g.msgId);
+  }
+
+  const total = (g.diamondCount || 0) * (g.repeatCount || 1);
+  let reason = null;
+  if (!force) {
+    if (!settings.autoPrint) reason = 'tắt tự động in';
+    else if (total < settings.minDiamonds) reason = `dưới ${settings.minDiamonds} 💎`;
+    else if (settings.oncePerUser && printedUsers.has(g.uniqueId)) reason = 'đã in rồi';
+  }
+
+  const rec = { ...g, id: ++seq, total, status: reason ? 'skipped' : 'queued', reason, error: null };
+  history.unshift(rec);
+  history.length = Math.min(history.length, 100);
+  io.emit('gift', rec);
+  console.log(`[gift] @${g.uniqueId} tặng ${g.repeatCount}x ${g.giftName} (${total} 💎) -> ${reason ? 'bỏ qua: ' + reason : 'IN'}`);
+
+  if (!reason) sendToPrinter(rec);
+}
+
+async function sendToPrinter(rec) {
+  if (!settings.printer) {
+    updateRecord(rec, { status: 'error', error: 'Chưa chọn máy in' });
+    return;
+  }
+  printedUsers.add(rec.uniqueId); // đánh dấu ngay để quà tiếp theo của người này không xếp hàng in trùng
+  updateRecord(rec, { status: 'queued', reason: null, error: null });
+  try {
+    await printGift(rec, { printer: settings.printer, paperMm: settings.paperMm });
+    updateRecord(rec, { status: 'printed' });
+  } catch (e) {
+    printedUsers.delete(rec.uniqueId); // in lỗi -> cho phép in lại lần sau
+    console.error('[print error]', e?.message || e);
+    updateRecord(rec, { status: 'error', error: e?.message || String(e) });
+  }
+}
+
+// =============================================================
+// 4. KẾT NỐI TIKTOK LIVE + TỰ ĐỘNG KẾT NỐI LẠI
+//  - Chưa lên live: cứ 30 giây kiểm tra lại, lên live là tự kết nối
+//  - Rớt mạng / TikTok ngắt: tự kết nối lại (5s, 10s, 20s... tối đa 60s)
+// =============================================================
+let live = null;
+let wantConnected = false;
+let retryTimer = null;
+let retryCount = 0;
+let lastStatus = { state: 'disconnected', message: 'Chưa kết nối' };
+
+function setStatus(state, message) {
+  lastStatus = { state, user: settings.username, message };
+  io.emit('status', lastStatus);
+  console.log(`[status] ${state} - ${message}`);
+}
+
+function closeConnection() {
+  if (!live) return;
+  const conn = live;
+  live = null;
+  conn.removeAllListeners(); // gỡ listener trước để sự kiện "disconnected" không kích hoạt kết nối lại
+  try {
+    conn.disconnect()?.catch?.(() => {});
+  } catch (_) {}
+}
+
+function scheduleRetry(ms) {
+  if (!wantConnected) return;
+  const delay = ms ?? Math.min(60000, 5000 * 2 ** retryCount++);
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(openConnection, delay);
+  return Math.round(delay / 1000);
+}
+
+async function openConnection() {
+  clearTimeout(retryTimer);
+  closeConnection();
+  const user = settings.username;
+  const conn = new TikTokLiveConnection(user, { processInitialData: false });
+  live = conn;
+
+  conn.on(WebcastEvent.GIFT, (data) => {
+    const g = parseGift(data);
+    // gift.type 1 = quà combo: trong lúc bấm liên tục TikTok gửi nhiều sự kiện,
+    // chỉ xử lý sự kiện cuối (repeatEnd = true) để không in trùng.
+    if (g.giftType === 1 && !g.repeatEnd) return;
+    handleGift(g);
+  });
+
+  conn.on(WebcastEvent.STREAM_END, () => {
+    closeConnection();
+    scheduleRetry(30000);
+    setStatus('waiting', `Live của @${user} đã kết thúc. Đang chờ lên live lại...`);
+  });
+
+  conn.on(ControlEvent.DISCONNECTED, () => {
+    if (live !== conn) return;
+    const s = scheduleRetry();
+    setStatus('reconnecting', `Mất kết nối, tự kết nối lại sau ${s}s...`);
+  });
+
+  conn.on(ControlEvent.ERROR, (err) => {
+    const ex = err?.exception || err;
+    if (ex instanceof UserOfflineError || ex?.name === 'UserOfflineError') return; // đã báo ở trạng thái "chờ live"
+    console.error('[live error]', err?.info ? `${err.info}: ${ex?.message || ex}` : ex?.message || ex);
+  });
+
+  setStatus('connecting', `Đang kết nối @${user}...`);
+  try {
+    const state = await conn.connect();
+    if (live !== conn) return; // đã bị ngắt/đổi tài khoản trong lúc đang kết nối
+    retryCount = 0;
+    setStatus('connected', `Đã kết nối @${user} (phòng ${state.roomId}). Có quà là tự in.`);
+  } catch (e) {
+    if (live !== conn) return;
+    closeConnection();
+    if (e instanceof UserOfflineError || e?.name === 'UserOfflineError') {
+      scheduleRetry(30000);
+      setStatus('waiting', `@${user} chưa lên live. Tự kiểm tra lại mỗi 30 giây...`);
+    } else {
+      const s = scheduleRetry();
+      setStatus('error', `Lỗi: ${e?.message || e}. Thử lại sau ${s}s...`);
+    }
+  }
+}
+
+function startLive(username) {
+  const user = String(username || '').replace(/^@/, '').trim();
+  if (!user) throw new Error('Chưa nhập username');
+  settings.username = user;
+  settings.autoConnect = true;
+  saveSettings();
+  wantConnected = true;
+  retryCount = 0;
+  openConnection();
+}
+
+function stopLive() {
+  wantConnected = false;
+  clearTimeout(retryTimer);
+  closeConnection();
+  settings.autoConnect = false;
+  saveSettings();
+  setStatus('disconnected', 'Đã ngắt kết nối');
+}
+
+// =============================================================
+// 5. PROXY ẢNH AVATAR cho giao diện (CDN TikTok chặn web khác lấy ảnh trực tiếp)
+// =============================================================
 const ALLOWED_IMG_HOST = /(^|\.)(tiktokcdn\.com|tiktokcdn-us\.com|tiktokcdn-eu\.com|ibyteimg\.com|byteimg\.com|muscdn\.com)$/i;
 
 app.get('/avatar', async (req, res) => {
   try {
     const url = new URL(String(req.query.url || ''));
-    if (url.protocol !== 'https:' || !ALLOWED_IMG_HOST.test(url.hostname)) {
-      return res.status(400).send('URL ảnh không hợp lệ');
-    }
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.tiktok.com/' } });
+    if (url.protocol !== 'https:' || !ALLOWED_IMG_HOST.test(url.hostname)) return res.status(400).send('URL ảnh không hợp lệ');
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.tiktok.com/' }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return res.status(502).send('Không tải được ảnh');
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
     res.set('Cache-Control', 'public, max-age=3600');
@@ -43,100 +262,29 @@ app.get('/avatar', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// Lấy thông tin gọn từ sự kiện gift.
-// Thư viện v2 trả về dữ liệu theo schema proto v3 (user.displayId, user.avatarThumb.urlList, gift.type...)
-// nhưng README cũ dùng tên khác (uniqueId, profilePicture, giftDetails) -> đọc cả hai cho chắc.
-// -------------------------------------------------------------
-function pickUrl(img) {
-  return img?.urlList?.[0] || img?.url?.[0] || null;
-}
-
-function parseGift(data) {
-  const u = data.user || {};
-  return {
-    uniqueId: u.uniqueId || u.displayId || u.id || 'unknown',
-    nickname: u.nickname || u.uniqueId || u.displayId || '',
-    avatar:
-      pickUrl(u.avatarLarge) || pickUrl(u.avatarMedium) || pickUrl(u.avatarThumb) || pickUrl(u.profilePicture),
-    giftName: data.gift?.name || data.giftDetails?.giftName || data.extendedGiftInfo?.name || `Gift #${data.giftId}`,
-    giftImage: pickUrl(data.gift?.image) || pickUrl(data.giftDetails?.giftImage),
-    giftType: data.gift?.type ?? data.giftDetails?.giftType,
-    diamondCount: data.gift?.diamondCount ?? data.giftDetails?.diamondCount ?? 0,
-    repeatCount: Number(data.repeatCount) || 1,
-    repeatEnd: Boolean(data.repeatEnd),
-    time: Date.now(),
-  };
-}
-
-// -------------------------------------------------------------
-// Quản lý kết nối TikTok LIVE (mỗi lúc chỉ 1 phiên live)
-// -------------------------------------------------------------
-let live = null; // TikTokLiveConnection hiện tại
-let liveUser = null;
-
-function broadcastStatus(state, message) {
-  io.emit('status', { state, user: liveUser, message });
-  console.log(`[status] ${state}${message ? ' - ' + message : ''}`);
-}
-
-async function connectLive(username) {
-  await disconnectLive();
-  liveUser = username.replace(/^@/, '').trim();
-  live = new TikTokLiveConnection(liveUser, { processInitialData: false });
-
-  // Sự kiện tặng quà
-  live.on(WebcastEvent.GIFT, (data) => {
-    const g = parseGift(data);
-    // giftType 1 = quà có thể "combo" (bấm liên tục). Trong lúc combo, TikTok bắn nhiều event,
-    // chỉ xử lý khi repeatEnd = true (kết thúc combo) để không in trùng.
-    if (g.giftType === 1 && !g.repeatEnd) return;
-    console.log(`[gift] @${g.uniqueId} tặng ${g.repeatCount}x ${g.giftName} (${g.diamondCount} 💎)`);
-    io.emit('gift', g);
-  });
-
-  live.on(WebcastEvent.STREAM_END, () => broadcastStatus('ended', 'Buổi live đã kết thúc'));
-  live.on(ControlEvent.DISCONNECTED, () => broadcastStatus('disconnected', 'Mất kết nối'));
-  live.on(ControlEvent.ERROR, (err) => console.error('[live error]', err?.message || err));
-
-  broadcastStatus('connecting', `Đang kết nối @${liveUser}...`);
-  const state = await live.connect();
-  broadcastStatus('connected', `Đã kết nối @${liveUser} (roomId ${state.roomId})`);
-}
-
-async function disconnectLive() {
-  if (live) {
-    try { live.removeAllListeners(); await live.disconnect(); } catch (_) {}
-    live = null;
-    broadcastStatus('disconnected', 'Đã ngắt kết nối');
-  }
-}
-
-// -------------------------------------------------------------
-// Socket.IO: giao tiếp giữa trình duyệt <-> server
-// -------------------------------------------------------------
+// =============================================================
+// 6. SOCKET.IO: giao diện web chỉ để XEM và CÀI ĐẶT
+// =============================================================
 io.on('connection', (socket) => {
-  socket.emit('status', { state: live ? 'connected' : 'disconnected', user: liveUser });
+  socket.emit('settings', settings);
+  socket.emit('status', lastStatus);
+  socket.emit('history', history);
 
-  socket.on('connect-live', async (username, ack) => {
+  socket.on('connect-live', (username, ack) => {
     try {
-      if (!username) throw new Error('Chưa nhập username');
-      await connectLive(username);
+      startLive(username);
       ack?.({ ok: true });
     } catch (e) {
-      const msg = e?.message || String(e);
-      broadcastStatus('error', msg);
-      live = null;
-      ack?.({ ok: false, error: msg });
+      ack?.({ ok: false, error: e.message });
     }
   });
-
-  socket.on('disconnect-live', async (ack) => {
-    await disconnectLive();
+  socket.on('disconnect-live', (ack) => {
+    stopLive();
     ack?.({ ok: true });
   });
 
-  // Lấy danh sách máy in đã cài trên máy tính (để chọn trong giao diện)
+  socket.on('update-settings', (patch) => updateSettings(patch));
+
   socket.on('list-printers', async (ack) => {
     try {
       ack?.({ ok: true, ...(await listPrinters()) });
@@ -145,34 +293,37 @@ io.on('connection', (socket) => {
     }
   });
 
-  // In trực tiếp ra máy in đã chọn (không qua hộp thoại in của Chrome)
-  socket.on('print-gift', async ({ gift, printer, paperMm }, ack) => {
-    try {
-      await printGift(gift, { printer, paperMm: Number(paperMm) || 58 });
-      ack?.({ ok: true });
-    } catch (e) {
-      console.error('[print error]', e);
-      ack?.({ ok: false, error: e?.message || String(e) });
-    }
+  // In lại 1 quà trong danh sách (bỏ qua bộ lọc)
+  socket.on('reprint', (id) => {
+    const rec = history.find((r) => r.id === id);
+    if (rec) sendToPrinter(rec);
   });
 
-  // Giả lập 1 lượt tặng quà để test máy in mà không cần đang live
-  socket.on('test-gift', () => {
-    io.emit('gift', {
-      uniqueId: 'test_user',
-      nickname: 'Người test',
-      avatar: null, // client sẽ dùng ảnh mẫu
-      giftName: 'Rose',
-      giftType: 1,
-      diamondCount: 1,
-      repeatCount: 1,
-      repeatEnd: true,
-      time: Date.now(),
-      test: true,
-    });
-  });
+  socket.on('reset-printed', () => printedUsers.clear());
+
+  // In thử (không cần đang live)
+  socket.on('test-print', () =>
+    handleGift(
+      { uniqueId: 'test_user', nickname: 'Người test', avatar: null, giftName: 'Rose', giftType: 1, diamondCount: 1, repeatCount: 1, time: Date.now(), test: true },
+      { force: true }
+    )
+  );
+});
+
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`❌ Cổng ${PORT} đang bị dùng: có thể app đã chạy ở một cửa sổ khác (tắt cửa sổ đó rồi chạy lại).`);
+    process.exit(1);
+  }
+  throw e;
 });
 
 server.listen(PORT, () => {
   console.log(`✅ Mở trình duyệt: http://localhost:${PORT}`);
+  // Lần trước đang bật kết nối -> tự kết nối lại khi khởi động server
+  if (settings.autoConnect && settings.username) {
+    console.log(`[auto] Tự kết nối lại @${settings.username}`);
+    wantConnected = true;
+    openConnection();
+  }
 });

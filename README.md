@@ -11,18 +11,34 @@ npm install
 npm start
 ```
 
-Sau đó mở **Chrome** vào http://localhost:3000, nhập username tài khoản đang live rồi bấm **Kết nối**.
+Sau đó mở trình duyệt vào http://localhost:3000, nhập username TikTok rồi bấm **Kết nối**.
+
+## Cách hoạt động
+
+```
+TikTok LIVE ──(có người tặng quà)──> server (npm start) ──(tự gửi lệnh in)──> Máy in nhiệt
+                                          │
+                                          └──> Trang web: chỉ để xem danh sách quà và cài đặt
+```
+
+- **Server tự in**: đóng trang web vẫn in bình thường, mở nhiều tab cũng không in trùng. Chỉ cần cửa sổ `npm start` còn chạy.
+- **Bấm Kết nối trước khi lên live cũng được**: hệ thống kiểm tra mỗi 30 giây, bạn lên live là tự kết nối.
+- **Rớt mạng / TikTok ngắt kết nối**: tự kết nối lại.
+- **Tắt rồi mở lại `npm start`**: tự kết nối lại tài khoản lần trước. Cài đặt được lưu trong `settings.json`.
+- **Quà combo** (bấm liên tục): chỉ in 1 lần, khi kết thúc combo.
+- **Avatar**: tự lấy ảnh lớn 1080px từ trang cá nhân để in nét, không lấy được thì dùng ảnh nhỏ.
+- **Tên có emoji / chữ Hàn, Trung...**: font không in được thì bỏ đi, nếu không còn gì thì in @username.
 
 ## 2. Chọn máy in (in thẳng ra giấy)
 
 1. Cắm máy in nhiệt vào máy tính và **cài driver** (máy in phải hiện trong *Cài đặt Windows → Máy in & máy quét*).
 2. Vào driver máy in → **Printing Preferences**: chọn đúng khổ giấy (58mm hoặc 80mm).
-3. Trên web, ở mục **Cách in**, chọn **"Gửi thẳng tới máy in"**. Ở ô **Máy in**, chọn đúng tên máy in nhiệt.
+3. Trên web, ở ô **Máy in**, chọn đúng tên máy in nhiệt.
    - **KHÔNG** chọn `Microsoft Print to PDF`, `Microsoft XPS`, `OneNote`... vì đó là máy in ảo, chỉ ra file.
    - Mới cắm máy in thì bấm nút **↻** để tải lại danh sách.
 4. Bấm **In thử**, giấy sẽ ra ngay mà không hiện hộp thoại nào.
 
-> Ở chế độ này, server (Node.js) tự tạo phiếu in rồi gửi thẳng tới máy in theo tên, không đi qua Chrome.
+> Server (Node.js) tự tạo phiếu in rồi gửi thẳng tới máy in theo tên, không qua hộp thoại in của trình duyệt.
 > Windows dùng SumatraPDF đi kèm thư viện `pdf-to-printer` để in im lặng, còn macOS/Linux dùng lệnh `lp` (CUPS).
 > File phiếu tạm sẽ tự xoá sau khi in.
 
@@ -39,6 +55,6 @@ Sau đó mở **Chrome** vào http://localhost:3000, nhập username tài khoả
 | Tự động in | Tắt đi thì chỉ ghi nhận quà, không in (bấm vào nhãn để in tay) |
 | Mỗi người chỉ in 1 lần | Một người tặng nhiều quà cũng chỉ in 1 lần. Bấm "Xoá danh sách đã in" để làm lại từ đầu |
 | Quà tối thiểu 💎 | Chỉ in khi quà có giá trị từ số kim cương này trở lên (tính cả combo) |
-| Cách in | **Gửi thẳng tới máy in** (khuyên dùng) hoặc qua hộp thoại in của Chrome (cách cũ) |
 | Máy in | Chọn máy in nhiệt thật, không chọn máy in PDF |
 | Khổ giấy | 50 / 58 / 80mm |
+| Bấm vào nhãn "Đã in" / "Bỏ qua" / "Lỗi in" | In lại người đó |

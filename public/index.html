@@ -18,75 +18,63 @@
     input[type=text], input[type=number], select { background:#0c0e12; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 10px; font-size:14px; }
     input[type=text] { flex:1; min-width: 140px; }
     input[type=number] { width: 90px; }
+    select { max-width: 100%; }
     button { border:0; border-radius:8px; padding:9px 14px; font-size:14px; font-weight:600; cursor:pointer; background:#2a2f3a; color:var(--text); }
     button.primary { background: var(--accent); color:#fff; }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-    label { font-size:14px; display:flex; gap:6px; align-items:center; }
-    .status { display:inline-flex; align-items:center; gap:8px; font-size:14px; }
-    .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
-    .dot.connected { background: var(--ok); } .dot.connecting { background: var(--warn); } .dot.error { background: var(--accent); }
-    .log { list-style:none; margin:0; padding:0; max-height: 420px; overflow:auto; }
+    label { font-size:14px; display:flex; gap:6px; align-items:center; flex-wrap: wrap; }
+    .status { display:flex; align-items:flex-start; gap:8px; font-size:14px; line-height:1.4; }
+    .dot { flex:none; margin-top:4px; width:10px; height:10px; border-radius:50%; background:var(--muted); }
+    .dot.connected { background: var(--ok); }
+    .dot.connecting, .dot.reconnecting, .dot.waiting { background: var(--warn); }
+    .dot.error { background: var(--accent); }
+    .log { list-style:none; margin:0; padding:0; max-height: 460px; overflow:auto; }
     .log li { display:flex; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
-    .log img { width:36px; height:36px; border-radius:50%; object-fit:cover; background:#333; }
+    .log img { width:36px; height:36px; border-radius:50%; object-fit:cover; background:#333; flex:none; }
     .log .meta { flex:1; min-width:0; }
     .log .meta b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .log .meta small { color:var(--muted); }
     .tag { font-size:12px; padding:2px 8px; border-radius:99px; background:#2a2f3a; color:var(--muted); white-space:nowrap; }
-    .tag.printed { background:#123d27; color:var(--ok); } .tag.skipped { background:#3a2a10; color:var(--warn); }
-    .hint { font-size:13px; color:var(--muted); line-height:1.5; }
-    code { background:#0c0e12; padding:1px 5px; border-radius:4px; }
-
-    /* ---------- Vùng in (ẩn trên màn hình, chỉ hiện khi in) ---------- */
-    #print-area { display:none; }
-    @media print {
-      body { background:#fff; }
-      .wrap { display:none !important; }
-      #print-area { display:flex; flex-direction:column; align-items:center; width: var(--paper-w, 58mm); padding: 3mm 0 6mm; color:#000; font-family: Arial, sans-serif; }
-      #print-area img { width: calc(var(--paper-w, 58mm) - 10mm); height: calc(var(--paper-w, 58mm) - 10mm); border-radius:50%; object-fit:cover; filter: grayscale(1) contrast(1.25); border: .6mm solid #000; }
-      #print-area .name { margin-top: 2mm; font-size: 12pt; font-weight: 700; text-align:center; max-width: 90%; word-break: break-all; }
-      #print-area .gift { font-size: 9pt; }
-    }
+    .tag.printed { background:#123d27; color:var(--ok); }
+    .tag.skipped { background:#3a2a10; color:var(--warn); }
+    .tag.error { background:#3d1220; color:#ff7a93; }
+    .tag.clickable { cursor:pointer; text-decoration: underline dotted; }
+    .hint { font-size:13px; color:var(--muted); line-height:1.5; margin: 0; }
+    .warn { color: var(--warn); }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>🎁 TikTok <span>Gift Printer</span></h1>
 
-    <!-- Kết nối -->
+    <!-- Kết nối LIVE -->
     <div class="card">
       <h2>Kết nối LIVE</h2>
       <div class="row">
-        <input id="username" type="text" placeholder="username TikTok đang live (vd: abc123)" />
+        <input id="username" type="text" placeholder="username TikTok (vd: abc123)" />
         <button id="btnConnect" class="primary">Kết nối</button>
         <button id="btnDisconnect">Ngắt</button>
       </div>
       <div class="status"><span id="dot" class="dot"></span><span id="statusText">Chưa kết nối</span></div>
+      <p class="hint" style="margin-top:10px">Có thể bấm Kết nối trước khi lên live, hệ thống sẽ tự chờ và tự kết nối khi bạn bắt đầu live.</p>
     </div>
 
     <!-- Cài đặt in -->
     <div class="card">
-      <h2>Cài đặt in</h2>
-      <div class="row"><label>Cách in
-        <select id="printMode">
-          <option value="direct">Gửi thẳng tới máy in (khuyên dùng)</option>
-          <option value="browser">Qua hộp thoại in của Chrome</option>
-        </select></label>
-      </div>
-      <div class="row" id="printerRow">
-        <label>Máy in <select id="printer" style="max-width:230px"><option value="">Đang tải...</option></select></label>
+      <h2>Máy in</h2>
+      <div class="row">
+        <label>Máy in <select id="printer"><option value="">Đang tải...</option></select></label>
         <button id="btnRefreshPrinters" title="Tải lại danh sách máy in">↻</button>
       </div>
-      <p class="hint" id="printerWarn" style="margin:-4px 0 10px;color:var(--warn)"></p>
-      <div class="row"><label><input id="autoPrint" type="checkbox" checked /> Tự động in khi có quà</label></div>
-      <div class="row"><label><input id="oncePerUser" type="checkbox" checked /> Mỗi người chỉ in 1 lần</label></div>
-      <div class="row"><label>Quà tối thiểu <input id="minDiamonds" type="number" min="0" value="1" /> 💎 (tính cả combo)</label></div>
+      <p class="hint warn" id="printerWarn"></p>
       <div class="row"><label>Khổ giấy
-        <select id="paper"><option value="58mm">58mm</option><option value="80mm">80mm</option><option value="50mm">50mm</option></select></label>
+        <select id="paperMm"><option value="58">58mm</option><option value="80">80mm</option><option value="50">50mm</option></select></label>
       </div>
+      <div class="row"><label><input id="autoPrint" type="checkbox" /> Tự động in khi có quà</label></div>
+      <div class="row"><label><input id="oncePerUser" type="checkbox" /> Mỗi người chỉ in 1 lần</label></div>
+      <div class="row"><label>Quà tối thiểu <input id="minDiamonds" type="number" min="0" /> 💎 (tính cả combo)</label></div>
       <div class="row">
         <button id="btnTest">🖨️ In thử</button>
         <button id="btnReset">Xoá danh sách đã in</button>
-        <span class="hint">Hàng chờ: <b id="queueLen">0</b></span>
       </div>
     </div>
 
@@ -94,17 +82,11 @@
     <div class="card" style="grid-column:1/-1">
       <h2>Quà nhận được</h2>
       <ul id="log" class="log"></ul>
-      <p class="hint">
-        Chế độ <b>Gửi thẳng tới máy in</b>: server in ra máy in đã chọn, không cần hộp thoại, không mở file PDF. Không được chọn "Microsoft Print to PDF".
+      <p class="hint" style="margin-top:10px">
+        Việc in do <b>server</b> tự làm: đóng trang này vẫn in bình thường (chỉ cần cửa sổ <code>npm start</code> còn chạy).
+        Bấm vào nhãn "Bỏ qua" / "Lỗi" / "Đã in" để in lại người đó.
       </p>
     </div>
-  </div>
-
-  <!-- Nội dung sẽ được in -->
-  <div id="print-area">
-    <img id="printImg" alt="" />
-    <div class="name" id="printName"></div>
-    <div class="gift" id="printGift"></div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -112,34 +94,27 @@
     const $ = (id) => document.getElementById(id);
     const socket = io();
 
-    // ---------------- Lưu cài đặt ----------------
-    const SETTINGS = ['username', 'autoPrint', 'oncePerUser', 'minDiamonds', 'paper', 'printMode', 'printer'];
-    function saveSettings() {
-      try {
-        const s = {};
-        SETTINGS.forEach((k) => (s[k] = $(k).type === 'checkbox' ? $(k).checked : $(k).value));
-        localStorage.setItem('gp-settings', JSON.stringify(s));
-      } catch (_) {}
-    }
-    try {
-      const s = JSON.parse(localStorage.getItem('gp-settings') || '{}');
-      SETTINGS.forEach((k) => { if (k in s) $(k).type === 'checkbox' ? ($(k).checked = s[k]) : ($(k).value = s[k]); });
-    } catch (_) {}
-    SETTINGS.forEach((k) => $(k).addEventListener('change', saveSettings));
-    // @page không đọc được biến CSS -> tạo thẻ <style> riêng cho khổ giấy
-    const pageStyle = document.createElement('style'); document.head.appendChild(pageStyle);
-    const applyPaper = () => {
-      const w = $('paper').value;
-      document.documentElement.style.setProperty('--paper-w', w);
-      pageStyle.textContent = `@page { size: ${w} ${parseInt(w) + 22}mm; margin: 0; }`;
-    };
-    $('paper').addEventListener('change', applyPaper); applyPaper();
+    // ---------------- Cài đặt: nằm trên server, giao diện chỉ hiển thị & gửi thay đổi ----------------
+    let settings = {};
+    socket.on('settings', (s) => {
+      settings = s;
+      if (document.activeElement !== $('username')) $('username').value = s.username || '';
+      $('paperMm').value = String(s.paperMm);
+      $('autoPrint').checked = s.autoPrint;
+      $('oncePerUser').checked = s.oncePerUser;
+      if (document.activeElement !== $('minDiamonds')) $('minDiamonds').value = s.minDiamonds;
+      if (s.printer && [...$('printer').options].some((o) => o.value === s.printer)) $('printer').value = s.printer;
+      checkPrinter();
+    });
+    const send = (patch) => socket.emit('update-settings', patch);
+    $('paperMm').onchange = () => send({ paperMm: Number($('paperMm').value) });
+    $('autoPrint').onchange = () => send({ autoPrint: $('autoPrint').checked });
+    $('oncePerUser').onchange = () => send({ oncePerUser: $('oncePerUser').checked });
+    $('minDiamonds').onchange = () => send({ minDiamonds: Number($('minDiamonds').value) });
+    $('printer').onchange = () => send({ printer: $('printer').value });
 
-    // ---------------- Danh sách máy in (lấy từ server) ----------------
-    let savedPrinter = $('printer').value;
-    try { savedPrinter = JSON.parse(localStorage.getItem('gp-settings') || '{}').printer || ''; } catch (_) {}
-    const isPdfPrinter = (n) => /pdf|xps|onenote|fax/i.test(n || '');
-
+    // ---------------- Danh sách máy in ----------------
+    const isVirtualPrinter = (n) => /pdf|xps|onenote|fax/i.test(n || '');
     function loadPrinters() {
       socket.emit('list-printers', (res) => {
         const sel = $('printer');
@@ -149,142 +124,75 @@
           $('printerWarn').textContent = res.ok ? 'Chưa có máy in nào được cài trên máy tính.' : 'Lỗi lấy danh sách máy in: ' + res.error;
           return;
         }
-        res.printers.forEach((name) => {
+        for (const name of res.printers) {
           const o = document.createElement('option');
-          o.value = name; o.textContent = name + (name === res.defaultPrinter ? ' (mặc định)' : '') + (isPdfPrinter(name) ? ' ⚠️ PDF' : '');
+          o.value = name;
+          o.textContent = name + (name === res.defaultPrinter ? ' (mặc định)' : '') + (isVirtualPrinter(name) ? ' ⚠️ máy in ảo' : '');
           sel.appendChild(o);
-        });
-        // Ưu tiên: máy đã chọn lần trước -> máy in thật đầu tiên -> máy mặc định
-        const real = res.printers.find((n) => !isPdfPrinter(n));
-        sel.value = res.printers.includes(savedPrinter) ? savedPrinter : (real || res.defaultPrinter || res.printers[0]);
-        savedPrinter = sel.value; saveSettings(); checkPrinter();
+        }
+        if (res.printers.includes(settings.printer)) {
+          sel.value = settings.printer;
+        } else {
+          // Chưa chọn: ưu tiên máy in thật đầu tiên (không phải PDF)
+          sel.value = res.printers.find((n) => !isVirtualPrinter(n)) || res.defaultPrinter || res.printers[0];
+          send({ printer: sel.value });
+        }
+        checkPrinter();
       });
     }
     function checkPrinter() {
-      const direct = $('printMode').value === 'direct';
-      $('printerRow').style.display = direct ? '' : 'none';
-      $('printerWarn').textContent = direct && isPdfPrinter($('printer').value)
-        ? 'Máy in đang chọn là máy in ảo (ra file PDF), hãy chọn máy in nhiệt thật.' : '';
+      const p = $('printer').value;
+      $('printerWarn').textContent = !p ? 'Chưa chọn máy in.'
+        : isVirtualPrinter(p) ? 'Đây là máy in ảo (chỉ ra file PDF). Hãy chọn máy in nhiệt thật.' : '';
     }
     $('btnRefreshPrinters').onclick = loadPrinters;
-    $('printer').addEventListener('change', () => { savedPrinter = $('printer').value; checkPrinter(); });
-    $('printMode').addEventListener('change', checkPrinter);
     socket.on('connect', loadPrinters);
 
-    // ---------------- Trạng thái kết nối ----------------
-    socket.on('status', ({ state, message, user }) => {
+    // ---------------- Kết nối LIVE ----------------
+    socket.on('status', ({ state, message }) => {
       $('dot').className = 'dot ' + state;
-      const label = { connected: 'Đã kết nối', connecting: 'Đang kết nối...', disconnected: 'Chưa kết nối', ended: 'Live đã kết thúc', error: 'Lỗi' }[state] || state;
-      $('statusText').textContent = message || (user && state === 'connected' ? `${label} @${user}` : label);
-      $('btnConnect').disabled = state === 'connecting';
+      $('statusText').textContent = message || state;
     });
-
-    $('btnConnect').onclick = () => {
-      saveSettings();
-      socket.emit('connect-live', $('username').value.trim(), (res) => { if (!res.ok) alert('Không kết nối được: ' + res.error); });
-    };
+    $('btnConnect').onclick = () =>
+      socket.emit('connect-live', $('username').value.trim(), (res) => { if (!res.ok) alert(res.error); });
     $('btnDisconnect').onclick = () => socket.emit('disconnect-live');
-    $('btnTest').onclick = () => socket.emit('test-gift');
+    $('btnTest').onclick = () => socket.emit('test-print');
+    $('btnReset').onclick = () => socket.emit('reset-printed');
 
-    // ---------------- Danh sách đã in (chống in trùng) ----------------
-    let printedUsers = new Set();
-    try { printedUsers = new Set(JSON.parse(sessionStorage.getItem('gp-printed') || '[]')); } catch (_) {}
-    const savePrinted = () => { try { sessionStorage.setItem('gp-printed', JSON.stringify([...printedUsers])); } catch (_) {} };
-    $('btnReset').onclick = () => { printedUsers.clear(); savePrinted(); };
-
-    // Ảnh mẫu cho nút "In thử"
+    // ---------------- Danh sách quà ----------------
     const SAMPLE_AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#ddd"/><circle cx="50" cy="38" r="18" fill="#555"/><ellipse cx="50" cy="88" rx="32" ry="24" fill="#555"/></svg>');
+    const rows = new Map(); // id -> <li>
 
-    const avatarSrc = (g) => g.avatar ? '/avatar?url=' + encodeURIComponent(g.avatar) : SAMPLE_AVATAR;
+    function renderTag(li, { status, reason, error }) {
+      const tag = li.querySelector('.tag');
+      const text = { queued: 'Đang in...', printed: 'Đã in', skipped: 'Bỏ qua: ' + reason, error: 'Lỗi in' }[status] || status;
+      tag.textContent = text;
+      tag.className = 'tag ' + status + (status === 'queued' ? '' : ' clickable');
+      tag.title = status === 'error' ? error + ' — bấm để in lại' : status === 'queued' ? '' : 'Bấm để in lại';
+    }
 
-    // ---------------- Nhận quà ----------------
-    socket.on('gift', (g) => {
-      const total = (g.diamondCount || 0) * (g.repeatCount || 1);
-      let reason = null;
-      if (!g.test) {
-        if (total < Number($('minDiamonds').value || 0)) reason = 'dưới mức tối thiểu';
-        else if ($('oncePerUser').checked && printedUsers.has(g.uniqueId)) reason = 'đã in rồi';
-      }
-      if (!$('autoPrint').checked && !g.test) reason = 'tắt tự động in';
-
-      const li = addLog(g, total, reason);
-      if (!reason) {
-        printedUsers.add(g.uniqueId); savePrinted();
-        enqueue(g, li);
-      }
-    });
-
-    function addLog(g, total, reason) {
+    function addRow(g, atTop = true) {
       const li = document.createElement('li');
-      const img = document.createElement('img'); img.src = avatarSrc(g);
+      const img = document.createElement('img');
+      img.src = g.avatar ? '/avatar?url=' + encodeURIComponent(g.avatar) : SAMPLE_AVATAR;
+      img.onerror = () => { img.src = SAMPLE_AVATAR; };
       const meta = document.createElement('div'); meta.className = 'meta';
       const b = document.createElement('b'); b.textContent = `${g.nickname} (@${g.uniqueId})`;
       const small = document.createElement('small');
-      small.textContent = `${g.repeatCount}x ${g.giftName} • ${total} 💎 • ${new Date(g.time).toLocaleTimeString()}`;
+      small.textContent = `${g.repeatCount}x ${g.giftName} • ${g.total} 💎 • ${new Date(g.time).toLocaleTimeString()}`;
       meta.append(b, small);
-      const tag = document.createElement('span');
-      tag.className = 'tag' + (reason ? ' skipped' : '');
-      tag.textContent = reason ? 'Bỏ qua: ' + reason : 'Chờ in';
-      // Cho phép bấm "In" thủ công với quà bị bỏ qua
-      if (reason) { tag.style.cursor = 'pointer'; tag.title = 'Bấm để in'; tag.onclick = () => enqueue(g, li); }
+      const tag = document.createElement('span'); tag.className = 'tag';
+      tag.onclick = () => { if (!tag.classList.contains('queued')) socket.emit('reprint', g.id); };
       li.append(img, meta, tag);
-      $('log').prepend(li);
-      return li;
+      renderTag(li, g);
+      rows.set(g.id, li);
+      atTop ? $('log').prepend(li) : $('log').append(li);
     }
 
-    // ---------------- Hàng chờ in (in lần lượt từng người) ----------------
-    const queue = [];
-    let printing = false;
-
-    function enqueue(g, li) {
-      queue.push({ g, li });
-      $('queueLen').textContent = queue.length;
-      processQueue();
-    }
-
-    function loadImage(img, src) {
-      return new Promise((resolve) => {
-        const done = () => resolve();
-        img.onload = done; img.onerror = () => { img.src = SAMPLE_AVATAR; };
-        img.src = src;
-        setTimeout(done, 5000); // tối đa chờ 5s
-      });
-    }
-
-    async function processQueue() {
-      if (printing || !queue.length) return;
-      printing = true;
-      const { g, li } = queue.shift();
-      $('queueLen').textContent = queue.length;
-
-      const tag = li.querySelector('.tag');
-      tag.className = 'tag'; tag.textContent = 'Đang in...'; tag.onclick = null; tag.style.cursor = '';
-      let error = null;
-
-      if ($('printMode').value === 'direct') {
-        // Server tạo phiếu in rồi gửi thẳng tới máy in theo tên
-        const res = await new Promise((resolve) =>
-          socket.timeout(60000).emit('print-gift', { gift: g, printer: $('printer').value, paperMm: parseInt($('paper').value) },
-            (err, r) => resolve(err ? { ok: false, error: 'Server không phản hồi' } : r)));
-        if (!res.ok) error = res.error;
-      } else {
-        $('printName').textContent = g.nickname || '@' + g.uniqueId;
-        $('printGift').textContent = `@${g.uniqueId} • ${g.repeatCount}x ${g.giftName}`;
-        await loadImage($('printImg'), avatarSrc(g));
-        window.print(); // Chrome --kiosk-printing: in thẳng, không hiện hộp thoại
-      }
-
-      if (error) {
-        tag.className = 'tag skipped'; tag.textContent = 'Lỗi in - bấm in lại'; tag.title = error;
-        tag.style.cursor = 'pointer'; tag.onclick = () => enqueue(g, li);
-      } else {
-        tag.className = 'tag printed'; tag.textContent = 'Đã in';
-      }
-      await new Promise((r) => setTimeout(r, 800)); // nghỉ chút giữa 2 lần in
-      printing = false;
-      processQueue();
-    }
+    socket.on('history', (list) => { $('log').innerHTML = ''; rows.clear(); list.forEach((g) => addRow(g, false)); });
+    socket.on('gift', (g) => addRow(g));
+    socket.on('gift-update', (u) => { const li = rows.get(u.id); if (li) renderTag(li, u); });
   </script>
 </body>
 </html>

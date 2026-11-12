@@ -10,12 +10,14 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import sharp from 'sharp';
 import PDFDocument from 'pdfkit';
+import * as fontkit from 'fontkit';
 import winPrinter from 'pdf-to-printer'; // Windows (dùng SumatraPDF đi kèm, in im lặng)
 
 const require = createRequire(import.meta.url);
 const FONT_BOLD = require.resolve('dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf'); // có đủ dấu tiếng Việt
 const FONT_REG = require.resolve('dejavu-fonts-ttf/ttf/DejaVuSans.ttf');
 
+const BOLD_FONT = fontkit.openSync(FONT_BOLD); // dùng để kiểm tra font có chữ đó không
 const isWin = process.platform === 'win32';
 const execFileAsync = promisify(execFile);
 const MM = 72 / 25.4; // 1mm = 2.835pt (đơn vị của PDF)
@@ -47,16 +49,49 @@ const PLACEHOLDER_SVG = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#ddd"/><circle cx="50" cy="38" r="18" fill="#555"/><ellipse cx="50" cy="88" rx="32" ry="24" fill="#555"/></svg>'
 );
 
-async function downloadAvatar(url) {
-  if (!url) return PLACEHOLDER_SVG;
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+
+async function fetchBuffer(url, timeoutMs = 8000) {
+  const r = await fetch(url, {
+    headers: { 'User-Agent': BROWSER_UA, Referer: 'https://www.tiktok.com/' },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return Buffer.from(await r.arrayBuffer());
+}
+
+// Sự kiện quà chỉ kèm avatar 100x100px (in ra bị mờ). Trang cá nhân TikTok có avatar 1080x1080
+// trong thẻ <script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"> -> lấy link đó (có cache).
+const largeAvatarCache = new Map();
+export async function fetchLargeAvatarUrl(handle) {
+  if (!handle) return null;
+  if (largeAvatarCache.has(handle)) return largeAvatarCache.get(handle);
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.tiktok.com/' } });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return Buffer.from(await r.arrayBuffer());
+    const html = (await fetchBuffer(`https://www.tiktok.com/@${encodeURIComponent(handle)}`, 6000)).toString('utf8');
+    const json = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/)?.[1];
+    const user = json && JSON.parse(json)?.__DEFAULT_SCOPE__?.['webapp.user-detail']?.userInfo?.user;
+    const url = user?.avatarLarger || user?.avatarMedium || null;
+    if (largeAvatarCache.size > 500) largeAvatarCache.clear();
+    largeAvatarCache.set(handle, url);
+    return url;
   } catch (e) {
-    console.warn('[printer] Không tải được avatar, dùng ảnh mẫu:', e.message);
-    return PLACEHOLDER_SVG;
+    console.warn(`[printer] Không lấy được avatar lớn của @${handle}:`, e.message);
+    return null;
   }
+}
+
+async function downloadAvatar(gift) {
+  // 1) avatar lớn từ trang cá nhân  2) avatar nhỏ trong sự kiện quà  3) ảnh mẫu
+  const large = gift.test ? null : await fetchLargeAvatarUrl(gift.uniqueId);
+  const candidates = [large, gift.avatar].filter(Boolean);
+  for (const url of candidates) {
+    try {
+      return await fetchBuffer(url);
+    } catch (e) {
+      console.warn('[printer] Không tải được avatar:', e.message);
+    }
+  }
+  return PLACEHOLDER_SVG;
 }
 
 async function makeRoundAvatar(input, size = 600) {
@@ -77,14 +112,19 @@ async function makeRoundAvatar(input, size = 600) {
   return sharp(round).flatten({ background: '#ffffff' }).composite([{ input: ring }]).png().toBuffer();
 }
 
-// Font không có emoji -> bỏ emoji khỏi tên để không in ra ô vuông
-const cleanText = (s) => String(s || '').replace(/[\p{Extended_Pictographic}️‍]/gu, '').trim();
+// Bỏ các ký tự font không có (emoji, chữ Hàn/Trung/Thái...) để không in ra ô vuông
+const cleanText = (s) =>
+  [...String(s || '')]
+    .filter((ch) => ch === ' ' || BOLD_FONT.hasGlyphForCodePoint(ch.codePointAt(0)))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 // -------------------------------------------------------------
 // Tạo file PDF đúng khổ giấy in nhiệt (rộng paperMm, cao tự tính)
 // -------------------------------------------------------------
 export async function renderTicketPdf(gift, paperMm = 58) {
-  const avatar = await makeRoundAvatar(await downloadAvatar(gift.avatar));
+  const avatar = await makeRoundAvatar(await downloadAvatar(gift));
 
   const margin = 4 * MM;
   const W = paperMm * MM;
@@ -99,7 +139,9 @@ export async function renderTicketPdf(gift, paperMm = 58) {
 
   doc.image(avatar, margin, margin, { width: imgSize, height: imgSize });
 
-  const name = cleanText(gift.nickname) || '@' + gift.uniqueId;
+  // Tên toàn emoji/chữ nước ngoài -> sau khi lọc còn quá ít -> dùng @username thay thế
+  const cleaned = cleanText(gift.nickname);
+  const name = cleaned.replace(/[^\p{L}\p{N}]/gu, '').length >= 2 ? cleaned : '@' + gift.uniqueId;
   doc.font(FONT_BOLD).fontSize(12).fillColor('#000')
     .text(name, 2 * MM, margin + imgSize + 2 * MM, { width: W - 4 * MM, align: 'center', height: 16, ellipsis: true, lineBreak: false });
   doc.font(FONT_REG).fontSize(8)
