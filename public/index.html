@@ -76,6 +76,8 @@
     .person img { width:28px; height:28px; border-radius:50%; object-fit:cover; background:#333; flex:none; }
     .person span { overflow:hidden; text-overflow:ellipsis; }
     .person small { color:var(--muted); }
+    .update-banner { grid-column:1/-1; background:#3a2a10; color:#ffd58a; border:1px solid #6b4d16; border-radius:12px; padding:12px 16px; font-size:14px; line-height:1.5; }
+    .update-banner code { background:#0c0e12; padding:1px 6px; border-radius:4px; }
     .tts-grid { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap:12px 16px; align-items:end; }
     @media (max-width: 760px) { .tts-grid { grid-template-columns: minmax(0,1fr); } }
     .field { display:flex; flex-direction:column; align-items:stretch; flex-wrap:nowrap; gap:6px; font-size:13px; color:var(--muted); }
@@ -88,6 +90,10 @@
 <body>
   <div class="wrap">
     <h1>🎁 TikTok <span>Gift Printer</span></h1>
+    <div id="updateBanner" class="update-banner" hidden>
+      ⚠️ <b>Chương trình đang chạy bản cũ.</b> Bạn đã cập nhật code (git pull) nhưng chưa khởi động lại, nên một số chức năng sẽ không chạy đúng.
+      Vào cửa sổ đang chạy <code>npm start</code>, bấm <code>Ctrl + C</code>, rồi chạy lại <code>npm start</code> và tải lại trang này.
+    </div>
     <nav class="tabs">
       <button data-tab="live">🎁 Live</button>
       <button data-tab="stats">📊 Thống kê</button>
@@ -226,6 +232,7 @@
   <script>
     const $ = (id) => document.getElementById(id);
     const socket = io();
+    const DEFAULT_THANKS = 'Thank you {name}! Here is a photo for you.';
 
     // ---------------- Cài đặt: nằm trên server, giao diện chỉ hiển thị & gửi thay đổi ----------------
     let settings = {};
@@ -236,7 +243,9 @@
       $('autoPrint').checked = s.autoPrint;
       $('oncePerUser').checked = s.oncePerUser;
       if (document.activeElement !== $('minDiamonds')) $('minDiamonds').value = s.minDiamonds;
-      if (document.activeElement !== $('ttsTemplate')) $('ttsTemplate').value = s.thanksTemplate || '';
+      // Không bao giờ xoá trắng ô: server không gửi câu đọc (server cũ) -> giữ nguyên / dùng câu mặc định
+      if (document.activeElement !== $('ttsTemplate')) $('ttsTemplate').value = s.thanksTemplate || $('ttsTemplate').value || DEFAULT_THANKS;
+      if (!('thanksTemplate' in s)) $('updateBanner').hidden = false;
       if (s.printer && [...$('printer').options].some((o) => o.value === s.printer)) $('printer').value = s.printer;
       checkPrinter();
     });
@@ -281,6 +290,17 @@
     }
     $('btnRefreshPrinters').onclick = loadPrinters;
     socket.on('connect', loadPrinters);
+
+    // Kiểm tra server có đang chạy đúng bản code mới nhất không (mỗi lần kết nối + mỗi 60 giây)
+    async function checkVersion() {
+      try {
+        const r = await fetch('/api/version', { cache: 'no-store' });
+        const v = r.ok ? await r.json() : null;
+        $('updateBanner').hidden = !!v && v.running === v.onDisk; // server quá cũ (chưa có API này) cũng báo
+      } catch (_) {}
+    }
+    socket.on('connect', checkVersion);
+    setInterval(checkVersion, 60000);
 
     // ---------------- Kết nối LIVE ----------------
     socket.on('status', ({ state, message }) => {
@@ -347,7 +367,6 @@
     socket.on('gift-update', (u) => { const li = rows.get(u.id); if (li) renderTag(li, u); });
 
     // ===================== ĐỌC LỜI CẢM ƠN (Web Speech API của trình duyệt) =====================
-    const DEFAULT_THANKS = 'Thank you {name}! Here is a photo for you.';
     const tts = window.speechSynthesis;
     let isSpeaker = false, speakerElsewhere = false, speakQueue = 0;
     const ttsPref = (() => { try { return JSON.parse(localStorage.getItem('gp-tts') || '{}'); } catch (_) { return {}; } })();

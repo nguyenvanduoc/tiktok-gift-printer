@@ -4,6 +4,7 @@
 //  (không phụ thuộc trình duyệt: đóng tab web vẫn in, mở nhiều tab cũng không in trùng)
 // =============================================================
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,24 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
+
+// -------------------------------------------------------------
+// Phát hiện "đã git pull nhưng chưa chạy lại npm start":
+// lúc khởi động ghi lại mã băm (hash) các file code; giao diện so với mã băm file hiện tại trên ổ đĩa.
+// Khác nhau = server đang chạy code cũ -> giao diện hiện cảnh báo bảo khởi động lại.
+// -------------------------------------------------------------
+const CODE_FILES = ['server.js', 'printer.js', 'stats.js', 'package.json', 'public/index.html'];
+function codeHash() {
+  const h = crypto.createHash('sha1');
+  for (const f of CODE_FILES) {
+    try {
+      h.update(fs.readFileSync(path.join(__dirname, f)));
+    } catch (_) {}
+  }
+  return h.digest('hex').slice(0, 12);
+}
+const RUNNING_HASH = codeHash();
+app.get('/api/version', (req, res) => res.json({ running: RUNNING_HASH, onDisk: codeHash() }));
 
 // =============================================================
 // 1. CÀI ĐẶT (lưu ra file settings.json để tắt/mở lại server vẫn còn)
